@@ -2,10 +2,8 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import {
-  initialDeveloperAuthActionState,
-  loginDeveloperAction,
-} from "@/actions/developer-auth.actions";
+import { loginDeveloperAction } from "@/actions/developer-auth.actions";
+import { initialDeveloperAuthActionState } from "@/actions/developer-auth.state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
