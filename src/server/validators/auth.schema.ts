@@ -20,32 +20,6 @@ export const emailSchema = z
 
 const requiredTextSchema = z.string().trim().min(2, "This field is required.");
 
-const optionalTextSchema = z
-  .string()
-  .trim()
-  .optional()
-  .transform((value) => {
-    if (!value) {
-      return null;
-    }
-
-    return value;
-  });
-
-const optionalEmailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .optional()
-  .transform((value) => {
-    if (!value) {
-      return null;
-    }
-
-    return value;
-  })
-  .pipe(z.string().email("Enter a valid email address.").nullable());
-
 const phonePasswordRegistrationSchema = z.object({
   fullName: requiredTextSchema,
   phoneNumber: phoneNumberSchema,
@@ -72,11 +46,6 @@ export const developerRegisterSchema = z.object({
   fullName: requiredTextSchema,
   email: emailSchema,
   password: passwordSchema,
-  companyName: requiredTextSchema,
-  companyPhone: phoneNumberSchema,
-  companyEmail: optionalEmailSchema,
-  rcNumber: optionalTextSchema,
-  officeAddress: optionalTextSchema,
 });
 
 export const developerLoginSchema = emailPasswordLoginSchema;
