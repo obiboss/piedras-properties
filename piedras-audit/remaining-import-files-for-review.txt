@@ -1,0 +1,2748 @@
+﻿PIEDRAS REMAINING MISSING IMPORTS
+Generated: 06/29/2026 15:13:42
+
+==============================
+GROUPED MISSING IMPORTS
+==============================
+2 x @/server/repositories/payment-allocations.repository
+2 x @/server/repositories/agent-paystack.repository
+2 x @/server/repositories/payments.repository
+2 x @/server/repositories/landlord-paystack.repository
+2 x @/server/repositories/payment-context.repository
+1 x @/server/services/tenant-activation.service
+1 x @/server/validators/payment.schema
+1 x @/server/utils/tenancy-balance
+1 x @/server/services/tenant-application-processing-fees.service
+1 x @/lib/landlord-payment-gate
+1 x @/lib/payout-verification
+1 x @/server/services/receipts.service
+1 x @/server/repositories/units.repository
+1 x @/server/services/agent-processing-fee.service
+1 x ./receipts.service
+1 x @/server/constants/rent-collection-fees
+1 x @/server/services/landlord-subscription-access.service
+1 x @/server/repositories/audit-log.repository
+1 x @/server/constants/permissions
+1 x @/server/repositories/tenant-dashboard.repository
+1 x @/server/services/tenancy-financial-integrity.service
+1 x @/server/repositories/tenancy-agreements.repository
+1 x @/server/repositories/agent-property-listings.repository
+1 x @/server/repositories/landlord-tenancy-charges.repository
+
+==============================
+FILES NEEDING REVIEW
+==============================
+
+--------------------------------------------------
+FILE: src\server\services\audit-log.service.ts
+--------------------------------------------------
+import "server-only";
+
+import { headers } from "next/headers";
+import { AUDIT_ACTOR_ROLES } from "@/server/constants/audit-events";
+import {
+  insertAuditLog,
+  listAuditLogsForLandlord,
+  listRenewalReminderAuditLogsForLandlord,
+  type AuditLogInsert,
+} from "@/server/repositories/audit-log.repository";
+import { createSupabaseAdminClient } from "@/server/supabase/admin";
+import { createSupabaseServerClient } from "@/server/supabase/server";
+import { requireLandlordPlatformOperator } from "@/server/services/auth.service";
+
+type WriteAuditLogInput = Omit<AuditLogInsert, "ipAddress" | "userAgent"> & {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+};
+
+async function getRequestAuditContext() {
+  try {
+    const requestHeaders = await headers();
+    const forwardedFor = requestHeaders.get("x-forwarded-for");
+    const ipAddress = forwardedFor?.split(",")[0]?.trim() || null;
+
+    return {
+      ipAddress,
+      userAgent: requestHeaders.get("user-agent"),
+    };
+  } catch {
+    return {
+      ipAddress: null,
+      userAgent: null,
+    };
+  }
+}
+
+export async function writeAuditLog(input: WriteAuditLogInput) {
+  const supabase = createSupabaseAdminClient();
+  const requestContext = await getRequestAuditContext();
+
+  await insertAuditLog(supabase, {
+    ...input,
+    ipAddress: input.ipAddress ?? requestContext.ipAddress,
+    userAgent: input.userAgent ?? requestContext.userAgent,
+  });
+}
+
+export async function writeSystemAuditLog(
+  input: Omit<WriteAuditLogInput, "actorRole" | "actorProfileId">,
+) {
+  await writeAuditLog({
+    ...input,
+    actorRole: AUDIT_ACTOR_ROLES.system,
+    actorProfileId: null,
+  });
+}
+
+export async function getCurrentLandlordAuditLogs() {
+  const landlord = await requireLandlordPlatformOperator();
+  const supabase = await createSupabaseServerClient();
+
+  return listAuditLogsForLandlord(supabase, landlord.id);
+}
+
+export async function getCurrentLandlordRenewalReminderAuditLogs() {
+  const landlord = await requireLandlordPlatformOperator();
+  const supabase = await createSupabaseServerClient();
+
+  return listRenewalReminderAuditLogsForLandlord(supabase, landlord.id);
+}
+
+
+--------------------------------------------------
+FILE: src\server\services\auth.service.ts
+--------------------------------------------------
+import "server-only";
+
+import { redirect } from "next/navigation";
+import {
+  assertPermission,
+  assertRole,
+  type AppPermission,
+} from "@/server/constants/permissions";
+import { createSupabaseServerClient } from "@/server/supabase/server";
+import type { ServerSessionUser, UserRole } from "@/server/types/auth.types";
+
+type ProfileRow = {
+  id: string;
+  role: UserRole;
+  full_name: string;
+  phone_number: string | null;
+  email: string | null;
+  is_active: boolean;
+};
+
+function mapProfileToSessionUser(profile: ProfileRow): ServerSessionUser {
+  return {
+    id: profile.id,
+    role: profile.role,
+    fullName: profile.full_name,
+    phoneNumber: profile.phone_number,
+    email: profile.email,
+  };
+}
+
+async function fetchSessionUserProfile() {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return null;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, role, full_name, phone_number, email, is_active")
+    .eq("id", user.id)
+    .single<ProfileRow>();
+
+  if (profileError || !profile || !profile.is_active) {
+    return null;
+  }
+
+  return mapProfileToSessionUser(profile);
+}
+
+export async function getSessionUser(): Promise<ServerSessionUser | null> {
+  return fetchSessionUserProfile();
+}
+
+export async function requireUser(): Promise<ServerSessionUser> {
+  const user = await fetchSessionUserProfile();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  return user;
+}
+
+export async function requireDeveloperUser(): Promise<ServerSessionUser> {
+  const user = await fetchSessionUserProfile();
+
+  if (!user) {
+    redirect("/developer/login");
+  }
+
+  assertRole({
+    role: user.role,
+    allowedRoles: ["developer"],
+    message: "You do not have permission to view this developer workspace.",
+  });
+
+  return user;
+}
+
+export async function requireRole(params: {
+  allowedRoles: readonly UserRole[];
+  message?: string;
+}): Promise<ServerSessionUser> {
+  const user = await requireUser();
+
+  assertRole({
+    role: user.role,
+    allowedRoles: params.allowedRoles,
+    message: params.message,
+  });
+
+  return user;
+}
+
+export async function requirePermission(
+  permission: AppPermission,
+): Promise<ServerSessionUser> {
+  const user = await requireUser();
+
+  assertPermission(user.role, permission);
+
+  return user;
+}
+
+export async function requireLandlord() {
+  return requireRole({
+    allowedRoles: ["landlord"],
+    message: "You do not have permission to view this landlord page.",
+  });
+}
+
+export async function requireLandlordPlatformOperator() {
+  const landlord = await requireLandlord();
+  const { assertLandlordPlatformAccessForProfile } =
+    await import("@/server/services/landlord-subscription-access.service");
+
+  await assertLandlordPlatformAccessForProfile(landlord.id);
+
+  return landlord;
+}
+
+export async function requireTenant() {
+  return requireRole({
+    allowedRoles: ["tenant"],
+    message: "You do not have permission to view this tenant page.",
+  });
+}
+
+export async function requireCaretaker() {
+  return requireRole({
+    allowedRoles: ["caretaker"],
+    message: "You do not have permission to view this caretaker page.",
+  });
+}
+
+export async function requireAgent() {
+  return requireRole({
+    allowedRoles: ["agent"],
+    message: "You do not have permission to view this agent page.",
+  });
+}
+
+export async function requireDeveloper() {
+  return requireDeveloperUser();
+}
+
+export async function requireLandlordOrCaretaker() {
+  return requireRole({
+    allowedRoles: ["landlord", "caretaker"],
+    message: "You do not have permission to access this landlord workspace.",
+  });
+}
+
+export async function requireLandlordOrAgent() {
+  return requireRole({
+    allowedRoles: ["landlord", "agent"],
+    message: "You do not have permission to access this workspace.",
+  });
+}
+
+
+--------------------------------------------------
+FILE: src\server\services\gateway-payment.service.ts
+--------------------------------------------------
+import "server-only";
+
+import crypto from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  AUDIT_ACTOR_ROLES,
+  AUDIT_ENTITY_TYPES,
+  AUDIT_EVENT_TYPES,
+} from "@/server/constants/audit-events";
+import {
+  calculateRentCollectionFee,
+  RENT_COLLECTION_FEE_MODEL,
+} from "@/server/constants/rent-collection-fees";
+import { AppError } from "@/server/errors/app-error";
+import { getActiveAgentPaystackAccount } from "@/server/repositories/agent-paystack.repository";
+import { getAgentPropertyListingById } from "@/server/repositories/agent-property-listings.repository";
+import {
+  createGatewayPaymentIntent,
+  getGatewayPaymentIntentByIdempotencyKey,
+  getGatewayPaymentIntentByReference,
+  getLatestGatewayPaymentIntentForTenancyPurpose,
+} from "@/server/repositories/gateway-payment.repository";
+import {
+  assertGatewayRentPaymentAmount,
+  getCanonicalTenancyBalance,
+} from "@/server/services/tenancy-financial-integrity.service";
+import { getPayableOutstandingBalance } from "@/server/utils/tenancy-balance";
+import { getActiveLandlordPaystackAccount } from "@/server/repositories/landlord-paystack.repository";
+import {
+  getActiveLandlordTenancyCharges,
+  sumActiveLandlordChargeAmount,
+} from "@/server/repositories/landlord-tenancy-charges.repository";
+import { createPaymentAllocations } from "@/server/repositories/payment-allocations.repository";
+import { getTenancyPaymentContext } from "@/server/repositories/payment-context.repository";
+import {
+  getActiveTenantTenancy,
+  getTenantDashboardTenantByProfile,
+} from "@/server/repositories/tenant-dashboard.repository";
+import { getTenancyAgreementByTenancyId } from "@/server/repositories/tenancy-agreements.repository";
+import {
+  writeAuditLog,
+  writeSystemAuditLog,
+} from "@/server/services/audit-log.service";
+import {
+  assertAgentPayoutVerified,
+  assertLandlordPayoutVerified,
+  getPaystackPayoutVerificationUiState,
+} from "@/server/services/paystack-verification.service";
+import { generateTenantActivationLinkSystem } from "@/server/services/tenant-activation.service";
+import { createSupabaseAdminClient } from "@/server/supabase/admin";
+import { createSupabaseServerClient } from "@/server/supabase/server";
+import { normalisePhoneNumber } from "@/server/utils/phone";
+import type { InitializeRentPaymentInput } from "@/server/validators/payment.schema";
+import { requireLandlordPlatformOperator, requireTenant } from "./auth.service";
+import { processVerifiedGatewayPaymentReference } from "./gateway-payment-webhook.service";
+import {
+  convertNairaToKobo,
+  createAgentDealTransactionSplit,
+  initializePaystackMultiSplitTransaction,
+  initializePaystackTransaction,
+} from "./paystack.service";
+import { getTenantRentReceiptDownloadUrlByGatewayReference } from "./receipts.service";
+
+const PAYMENT_LINK_EXPIRY_HOURS = 24;
+const PAYMENT_PURPOSE_NEW_TENANT_FIRST_RENT = "new_tenant_first_rent";
+const PAYMENT_PURPOSE_TENANT_DASHBOARD_RENT = "tenant_dashboard_rent";
+const PAYMENT_PURPOSE_LANDLORD_PREPARED_RENT = "landlord_prepared_rent_payment";
+
+type GatewayPaymentInitializerActorRole =
+  | typeof AUDIT_ACTOR_ROLES.landlord
+  | typeof AUDIT_ACTOR_ROLES.tenant
+  | typeof AUDIT_ACTOR_ROLES.system;
+
+function getAppBaseUrl() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+  if (!appUrl) {
+    throw new AppError("APP_URL_MISSING", "App URL is not configured.", 500);
+  }
+
+  return appUrl.replace(/\/$/, "");
+}
+
+function getTenantPaymentUrl(reference: string) {
+  return `${getAppBaseUrl()}/t/pay/${reference}`;
+}
+
+function getTenantPaymentVerifyUrl(reference: string) {
+  return `${getTenantPaymentUrl(reference)}?verify=1`;
+}
+
+function formatNairaAmount(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function buildTenantPaymentMessage(params: {
+  tenantName: string;
+  landlordName: string;
+  propertyName: string;
+  unitName: string;
+  rentAmount: number;
+  landlordChargesAmount: number;
+  agentCommissionAmount: number;
+  bopaServiceFeeAmount: number;
+  totalAmount: number;
+  paymentUrl: string;
+  expiresAt: string;
+}) {
+  const expiryText = new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Lagos",
+  }).format(new Date(params.expiresAt));
+
+  const chargeLines =
+    params.landlordChargesAmount > 0
+      ? [`Landlord charges: ${formatNairaAmount(params.landlordChargesAmount)}`]
+      : [];
+
+  const agentLines =
+    params.agentCommissionAmount > 0
+      ? [`Agent commission: ${formatNairaAmount(params.agentCommissionAmount)}`]
+      : [];
+
+  return [
+    `Hello ${params.tenantName},`,
+    "",
+    `${params.landlordName} has prepared your rent payment link for ${params.unitName} at ${params.propertyName}.`,
+    "",
+    `Rent amount: ${formatNairaAmount(params.rentAmount)}`,
+    ...chargeLines,
+    ...agentLines,
+    `BOPA Service Fee: ${formatNairaAmount(params.bopaServiceFeeAmount)}`,
+    `Total payable: ${formatNairaAmount(params.totalAmount)}`,
+    `Link expires: ${expiryText}`,
+    "",
+    "Please use this secure link to review the amount and continue to Paystack:",
+    params.paymentUrl,
+    "",
+    "Your tenant account activation will only be available after your full payment is confirmed.",
+  ].join("\n");
+}
+
+function createPaymentReference() {
+  return `bopa_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+function createPaymentIdempotencyKey() {
+  return crypto.randomUUID();
+}
+
+function createPaymentLinkExpiry() {
+  return new Date(
+    Date.now() + PAYMENT_LINK_EXPIRY_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+}
+
+function getFallbackExpiryFromCreatedAt(createdAt: string) {
+  const createdDate = new Date(createdAt);
+
+  if (Number.isNaN(createdDate.getTime())) {
+    return null;
+  }
+
+  return new Date(
+    createdDate.getTime() + PAYMENT_LINK_EXPIRY_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+}
+
+function getEffectiveExpiry(params: {
+  expiresAt: string | null;
+  createdAt: string;
+}) {
+  return params.expiresAt ?? getFallbackExpiryFromCreatedAt(params.createdAt);
+}
+
+function isPaymentIntentExpired(params: {
+  status: string;
+  expiresAt: string | null;
+  createdAt: string;
+}) {
+  if (params.status === "paid") {
+    return false;
+  }
+
+  const expiry = getEffectiveExpiry({
+    expiresAt: params.expiresAt,
+    createdAt: params.createdAt,
+  });
+
+  if (!expiry) {
+    return false;
+  }
+
+  return new Date(expiry).getTime() <= Date.now();
+}
+
+function getTenantPaymentEmail(params: {
+  tenantEmail: string | null;
+  tenantPhoneNumber: string;
+}) {
+  const email = params.tenantEmail?.trim().toLowerCase();
+
+  if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return email;
+  }
+
+  const sanitizedPhone = params.tenantPhoneNumber.replace(/\D/g, "");
+
+  if (sanitizedPhone.length >= 7) {
+    return `tenant-${sanitizedPhone}@boldverseproperty.com`;
+  }
+
+  return "payments@boldverseproperty.com";
+}
+
+function assertGatewayAmountStructure(params: {
+  rentAmount: number;
+  landlordChargesAmount: number;
+  agentCommissionAmount: number;
+  bopaServiceFeeAmount: number;
+  landlordShareAmount: number;
+  totalAmount: number;
+}) {
+  if (params.rentAmount <= 0) {
+    throw new AppError(
+      "RENT_AMOUNT_INVALID",
+      "Rent amount must be greater than zero.",
+      400,
+    );
+  }
+
+  if (params.landlordChargesAmount < 0) {
+    throw new AppError(
+      "LANDLORD_CHARGES_INVALID",
+      "Landlord charges cannot be negative.",
+      500,
+    );
+  }
+
+  if (params.agentCommissionAmount < 0) {
+    throw new AppError(
+      "AGENT_COMMISSION_INVALID",
+      "Agent commission cannot be negative.",
+      500,
+    );
+  }
+
+  if (params.bopaServiceFeeAmount < 0) {
+    throw new AppError(
+      "BOPA_SERVICE_FEE_INVALID",
+      "BOPA Service Fee cannot be negative.",
+      500,
+    );
+  }
+
+  if (
+    params.landlordShareAmount !==
+    params.rentAmount + params.landlordChargesAmount
+  ) {
+    throw new AppError(
+      "LANDLORD_SHARE_MISMATCH",
+      "Landlord share must equal rent plus landlord charges.",
+      500,
+    );
+  }
+
+  if (
+    params.totalAmount !==
+    params.landlordShareAmount +
+      params.agentCommissionAmount +
+      params.bopaServiceFeeAmount
+  ) {
+    throw new AppError(
+      "GATEWAY_TOTAL_MISMATCH",
+      "Payment total does not match landlord share, agent commission, and BOPA Service Fee.",
+      500,
+    );
+  }
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function readMetadataText(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = metadata[key];
+
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readMetadataBoolean(
+  metadata: Record<string, unknown>,
+  key: string,
+): boolean {
+  return metadata[key] === true;
+}
+
+function readMetadataNumber(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function readMetadataArray(
+  metadata: Record<string, unknown>,
+  key: string,
+): Record<string, unknown>[] {
+  const value = metadata[key];
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      typeof item === "object" && item !== null && !Array.isArray(item),
+  );
+}
+
+async function auditExpiredPaymentLinkOnce(params: {
+  landlordId: string;
+  tenantId: string;
+  tenancyId: string;
+  intentId: string;
+  reference: string;
+  expiresAt: string | null;
+}) {
+  await writeSystemAuditLog({
+    landlordId: params.landlordId,
+    tenantId: params.tenantId,
+    tenancyId: params.tenancyId,
+    eventType: AUDIT_EVENT_TYPES.paymentLinkExpired,
+    entityType: AUDIT_ENTITY_TYPES.payment,
+    entityId: params.intentId,
+    description: "Tenant rent payment link expired.",
+    metadata: {
+      gateway_payment_intent_id: params.intentId,
+      paystack_reference: params.reference,
+      expires_at: params.expiresAt,
+    },
+  });
+}
+
+async function resolveReusablePaymentIntent(params: {
+  tenancyId: string;
+  landlordId: string;
+  idempotencyKey: string;
+  paymentPurpose: string;
+}) {
+  const supabase = createSupabaseAdminClient();
+
+  const existingIdempotentIntent =
+    await getGatewayPaymentIntentByIdempotencyKey(supabase, {
+      landlordId: params.landlordId,
+      idempotencyKey: params.idempotencyKey,
+    });
+
+  if (existingIdempotentIntent) {
+    return existingIdempotentIntent;
+  }
+
+  return getLatestGatewayPaymentIntentForTenancyPurpose(supabase, {
+    tenancyId: params.tenancyId,
+    paymentPurpose: params.paymentPurpose,
+    status: "initialized",
+  });
+}
+
+function getReusableIntentAgentId(metadata: Record<string, unknown>) {
+  const agentDeal = toRecord(metadata.agent_deal);
+  const agentDealAgentId = readMetadataText(agentDeal, "agent_id");
+
+  if (agentDealAgentId) {
+    return agentDealAgentId;
+  }
+
+  const allocations = toRecord(metadata.allocations);
+  const agentAllocation = toRecord(allocations.agent);
+
+  return readMetadataText(agentAllocation, "agent_id");
+}
+
+async function assertReusableGatewayIntentPayoutsVerified(params: {
+  supabase: SupabaseClient;
+  metadata: Record<string, unknown>;
+  agentPropertyListingId: string | null;
+  invitedByAgentId: string | null;
+}) {
+  if (readMetadataNumber(params.metadata, "agent_commission_amount") <= 0) {
+    return;
+  }
+
+  const agentId = getReusableIntentAgentId(params.metadata);
+
+  if (agentId) {
+    const agentPaystackAccount = await getActiveAgentPaystackAccount(
+      params.supabase,
+      agentId,
+    );
+
+    assertAgentPayoutVerified(agentPaystackAccount);
+    return;
+  }
+
+  const agentDealAllocation = await resolveAgentDealPaymentAllocation({
+    agentPropertyListingId: params.agentPropertyListingId,
+    invitedByAgentId: params.invitedByAgentId,
+  });
+
+  if (agentDealAllocation?.isAgentCommissionPayable !== true) {
+    assertAgentPayoutVerified(null);
+  }
+}
+
+async function resolveAgentDealPaymentAllocation(params: {
+  agentPropertyListingId: string | null;
+  invitedByAgentId: string | null;
+}) {
+  if (!params.agentPropertyListingId || !params.invitedByAgentId) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const listing = await getAgentPropertyListingById(
+    supabase,
+    params.agentPropertyListingId,
+  );
+
+  if (listing.status !== "converted") {
+    return null;
+  }
+
+  if (listing.agent_id !== params.invitedByAgentId) {
+    return null;
+  }
+
+  const commissionAmount = Number(listing.agent_commission_amount ?? 0);
+
+  if (!Number.isFinite(commissionAmount) || commissionAmount <= 0) {
+    return {
+      listing,
+      agentPaystackAccount: null,
+      commissionAmount: 0,
+      isAgentDeal: true,
+      isAgentCommissionPayable: false,
+    };
+  }
+
+  const agentPaystackAccount = await getActiveAgentPaystackAccount(
+    supabase,
+    listing.agent_id,
+  );
+
+  const verifiedAgentPaystackAccount =
+    assertAgentPayoutVerified(agentPaystackAccount);
+
+  return {
+    listing,
+    agentPaystackAccount: verifiedAgentPaystackAccount,
+    commissionAmount,
+    isAgentDeal: true,
+    isAgentCommissionPayable: true,
+  };
+}
+
+async function initializeGatewayPaymentForTenancy(params: {
+  tenancyId: string;
+  amount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  idempotencyKey: string;
+  paymentPurpose: string;
+  auditDescription: string;
+  actorProfileId: string | null;
+  actorRole: GatewayPaymentInitializerActorRole;
+  requireAcceptedAgreement: boolean;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const tenancy = await getTenancyPaymentContext(supabase, params.tenancyId);
+
+  if (
+    tenancy.tenancy_status !== "active" ||
+    tenancy.agreement_live_at === null
+  ) {
+    throw new AppError(
+      "TENANCY_NOT_ACTIVE",
+      "Payment can only be made for an active rental agreement.",
+      400,
+    );
+  }
+
+  if (!tenancy.tenants) {
+    throw new AppError(
+      "TENANT_NOT_FOUND",
+      "We could not find the tenant for this payment.",
+      404,
+    );
+  }
+
+  if (params.requireAcceptedAgreement) {
+    const agreement = await getTenancyAgreementByTenancyId(
+      supabase,
+      tenancy.id,
+    );
+
+    if (agreement?.document_status !== "accepted") {
+      throw new AppError(
+        "AGREEMENT_NOT_ACCEPTED",
+        "The tenant must accept the tenancy agreement before rent payment can continue.",
+        400,
+      );
+    }
+  }
+
+  const tenantPhone = normalisePhoneNumber(tenancy.tenants.phone_number);
+  const propertyName =
+    tenancy.units?.properties?.property_name ?? "your apartment";
+  const unitName = tenancy.units?.unit_identifier ?? "your unit";
+  const paystackAccount = await getActiveLandlordPaystackAccount(
+    supabase,
+    tenancy.landlord_id,
+  );
+
+  const verifiedPaystackAccount = assertLandlordPayoutVerified(paystackAccount);
+
+  const reusableIntent = await resolveReusablePaymentIntent({
+    tenancyId: tenancy.id,
+    landlordId: tenancy.landlord_id,
+    idempotencyKey: params.idempotencyKey,
+    paymentPurpose: params.paymentPurpose,
+  });
+
+  if (reusableIntent) {
+    const reusableExpiry = getEffectiveExpiry({
+      expiresAt: reusableIntent.expires_at,
+      createdAt: reusableIntent.created_at,
+    });
+
+    if (
+      isPaymentIntentExpired({
+        status: reusableIntent.status,
+        expiresAt: reusableIntent.expires_at,
+        createdAt: reusableIntent.created_at,
+      })
+    ) {
+      await auditExpiredPaymentLinkOnce({
+        landlordId: reusableIntent.landlord_id,
+        tenantId: reusableIntent.tenant_id,
+        tenancyId: reusableIntent.tenancy_id,
+        intentId: reusableIntent.id,
+        reference: reusableIntent.paystack_reference,
+        expiresAt: reusableExpiry,
+      });
+
+      throw new AppError(
+        "PAYMENT_LINK_EXPIRED",
+        "This payment link has expired. Please prepare a new payment link.",
+        410,
+      );
+    }
+
+    const metadata = toRecord(reusableIntent.metadata);
+
+    await assertReusableGatewayIntentPayoutsVerified({
+      supabase,
+      metadata,
+      agentPropertyListingId: tenancy.tenants.agent_property_listing_id,
+      invitedByAgentId: tenancy.tenants.invited_by_agent_id,
+    });
+
+    const tenantPaymentUrl = getTenantPaymentUrl(
+      reusableIntent.paystack_reference,
+    );
+    const bopaServiceFeeAmount =
+      readMetadataNumber(metadata, "bopa_service_fee_amount") ||
+      Number(reusableIntent.tenuro_fee_amount);
+
+    return {
+      tenantId: tenancy.tenant_id,
+      authorizationUrl: reusableIntent.authorization_url,
+      accessCode: reusableIntent.paystack_access_code,
+      reference: reusableIntent.paystack_reference,
+      tenantPaymentUrl,
+      tenantWhatsappNumber: tenantPhone.national,
+      expiresAt: reusableExpiry,
+      whatsappMessage: buildTenantPaymentMessage({
+        tenantName: tenancy.tenants.full_name,
+        landlordName: "Your landlord",
+        propertyName,
+        unitName,
+        rentAmount: Number(reusableIntent.rent_amount),
+        landlordChargesAmount: readMetadataNumber(
+          metadata,
+          "landlord_charges_amount",
+        ),
+        agentCommissionAmount: readMetadataNumber(
+          metadata,
+          "agent_commission_amount",
+        ),
+        bopaServiceFeeAmount,
+        totalAmount: Number(reusableIntent.total_amount),
+        paymentUrl: tenantPaymentUrl,
+        expiresAt: reusableExpiry ?? reusableIntent.created_at,
+      }),
+    };
+  }
+
+  const landlordCharges = await getActiveLandlordTenancyCharges(supabase, {
+    tenancyId: tenancy.id,
+    landlordId: tenancy.landlord_id,
+  });
+
+  const rentAmount = params.amount;
+  const landlordChargesAmount = sumActiveLandlordChargeAmount(landlordCharges);
+  const rentCollectionFee = calculateRentCollectionFee({
+    annualRentAmount: Number(tenancy.rent_amount),
+    paymentAmount: rentAmount,
+  });
+  const bopaServiceFeeAmount = rentCollectionFee.feeAmount;
+  const bopaServiceFeePercentage = rentCollectionFee.ratePercentage;
+  const expiresAt = createPaymentLinkExpiry();
+
+  const agentDealAllocation = await resolveAgentDealPaymentAllocation({
+    agentPropertyListingId: tenancy.tenants.agent_property_listing_id,
+    invitedByAgentId: tenancy.tenants.invited_by_agent_id,
+  });
+
+  const agentCommissionAmount = agentDealAllocation?.commissionAmount ?? 0;
+  const landlordShareAmount = rentAmount + landlordChargesAmount;
+  const totalAmount =
+    landlordShareAmount + agentCommissionAmount + bopaServiceFeeAmount;
+
+  assertGatewayAmountStructure({
+    rentAmount,
+    landlordChargesAmount,
+    agentCommissionAmount,
+    bopaServiceFeeAmount,
+    landlordShareAmount,
+    totalAmount,
+  });
+
+  const bopaServiceFeeKobo = convertNairaToKobo(bopaServiceFeeAmount);
+  const totalAmountKobo = convertNairaToKobo(totalAmount);
+  const reference = createPaymentReference();
+
+  const shouldUseAgentMultiSplit =
+    agentDealAllocation?.isAgentCommissionPayable === true &&
+    agentDealAllocation.agentPaystackAccount !== null;
+
+  const agentDealSplit = shouldUseAgentMultiSplit
+    ? await createAgentDealTransactionSplit({
+        name: `BOPA Agent Deal ${reference}`,
+        landlordSubaccountCode:
+          verifiedPaystackAccount.paystack_subaccount_code,
+        landlordShareKobo: convertNairaToKobo(landlordShareAmount),
+        agentSubaccountCode: assertAgentPayoutVerified(
+          agentDealAllocation.agentPaystackAccount,
+        ).paystack_subaccount_code,
+        agentShareKobo: convertNairaToKobo(agentCommissionAmount),
+        currencyCode: tenancy.currency_code,
+      })
+    : null;
+
+  const landlordChargesSummary = landlordCharges.map((charge) => ({
+    id: charge.id,
+    charge_name: charge.charge_name,
+    amount: Number(charge.amount),
+    currency_code: charge.currency_code,
+    is_refundable: charge.is_refundable,
+    is_required_before_move_in: charge.is_required_before_move_in,
+  }));
+
+  const metadata = {
+    tenancy_id: tenancy.id,
+    tenant_id: tenancy.tenant_id,
+    landlord_id: tenancy.landlord_id,
+    expected_amount_naira: totalAmount,
+    rent_amount_naira: rentAmount,
+    landlord_charges_amount: landlordChargesAmount,
+    agent_commission_amount: agentCommissionAmount,
+    bopa_service_fee_amount: bopaServiceFeeAmount,
+    bopa_service_fee_percentage: bopaServiceFeePercentage,
+    fee_model: RENT_COLLECTION_FEE_MODEL,
+    annual_rent_amount: rentCollectionFee.annualRentAmount,
+    bopa_collection_fee_amount: rentCollectionFee.feeAmount,
+    bopa_collection_fee_rate: rentCollectionFee.rate,
+    bopa_collection_fee_percentage: rentCollectionFee.ratePercentage,
+    bopa_collection_fee_tier: rentCollectionFee.tierLabel,
+    tenuro_fee_naira: bopaServiceFeeAmount,
+    landlord_share_amount: landlordShareAmount,
+    total_amount_naira: totalAmount,
+    currency_code: tenancy.currency_code,
+    period_start: params.periodStart,
+    period_end: params.periodEnd,
+    payment_link_expires_at: expiresAt,
+    idempotency_key: params.idempotencyKey,
+    property_name: propertyName,
+    unit_identifier: unitName,
+    payment_purpose: params.paymentPurpose,
+    automatic_after_agreement:
+      params.paymentPurpose === PAYMENT_PURPOSE_NEW_TENANT_FIRST_RENT,
+    landlord_charges: landlordChargesSummary,
+    agent_deal: agentDealAllocation
+      ? {
+          is_agent_deal: agentDealAllocation.isAgentDeal,
+          is_agent_commission_payable:
+            agentDealAllocation.isAgentCommissionPayable,
+          agent_id: agentDealAllocation.listing.agent_id,
+          agent_property_listing_id: agentDealAllocation.listing.id,
+          agent_commission_amount: agentCommissionAmount,
+          agent_paystack_subaccount_code:
+            agentDealAllocation.agentPaystackAccount
+              ?.paystack_subaccount_code ?? null,
+        }
+      : null,
+    allocations: {
+      landlord: {
+        amount: landlordShareAmount,
+        rent_amount: rentAmount,
+        landlord_charges_amount: landlordChargesAmount,
+      },
+      agent: {
+        amount: agentCommissionAmount,
+        agent_id: agentDealAllocation?.listing.agent_id ?? null,
+        agent_property_listing_id: agentDealAllocation?.listing.id ?? null,
+      },
+      platform: {
+        amount: bopaServiceFeeAmount,
+        fee_type: "bopa_service_fee",
+        fee_model: RENT_COLLECTION_FEE_MODEL,
+        fee_rate: rentCollectionFee.rate,
+        fee_percentage: bopaServiceFeePercentage,
+        fee_tier: rentCollectionFee.tierLabel,
+        fee_basis: "rent_amount_only",
+      },
+    },
+    paystack_split: agentDealSplit
+      ? {
+          mode: "agent_deal_flat_split",
+          split_code: agentDealSplit.split_code,
+          split_id: agentDealSplit.id,
+          landlord_subaccount: verifiedPaystackAccount.paystack_subaccount_code,
+          landlord_share_kobo: convertNairaToKobo(landlordShareAmount),
+          agent_subaccount:
+            agentDealAllocation?.agentPaystackAccount
+              ?.paystack_subaccount_code ?? null,
+          agent_share_kobo: convertNairaToKobo(agentCommissionAmount),
+          platform_remainder_kobo: bopaServiceFeeKobo,
+          bearer: "account",
+        }
+      : {
+          mode: "subaccount_bopa_service_fee",
+          subaccount: verifiedPaystackAccount.paystack_subaccount_code,
+          transaction_charge_kobo: bopaServiceFeeKobo,
+          landlord_share_amount: landlordShareAmount,
+          bearer: "subaccount",
+        },
+  };
+
+  const initializedTransaction = agentDealSplit
+    ? await initializePaystackMultiSplitTransaction({
+        email: getTenantPaymentEmail({
+          tenantEmail: tenancy.tenants.email,
+          tenantPhoneNumber: tenancy.tenants.phone_number,
+        }),
+        amountKobo: totalAmountKobo,
+        reference,
+        callbackUrl: getTenantPaymentVerifyUrl(reference),
+        splitCode: agentDealSplit.split_code,
+        currencyCode: tenancy.currency_code,
+        metadata,
+      })
+    : await initializePaystackTransaction({
+        email: getTenantPaymentEmail({
+          tenantEmail: tenancy.tenants.email,
+          tenantPhoneNumber: tenancy.tenants.phone_number,
+        }),
+        amountKobo: totalAmountKobo,
+        reference,
+        callbackUrl: getTenantPaymentVerifyUrl(reference),
+        subaccountCode: verifiedPaystackAccount.paystack_subaccount_code,
+        transactionChargeKobo: bopaServiceFeeKobo,
+        currencyCode: tenancy.currency_code,
+        metadata,
+      });
+
+  const intent = await createGatewayPaymentIntent(supabase, {
+    landlordId: tenancy.landlord_id,
+    tenantId: tenancy.tenant_id,
+    tenancyId: tenancy.id,
+    paystackReference: initializedTransaction.reference,
+    paystackAccessCode: initializedTransaction.access_code,
+    authorizationUrl: initializedTransaction.authorization_url,
+    rentAmount,
+    tenuroFeeAmount: bopaServiceFeeAmount,
+    totalAmount,
+    currencyCode: tenancy.currency_code,
+    periodStart: params.periodStart,
+    periodEnd: params.periodEnd,
+    expiresAt,
+    idempotencyKey: params.idempotencyKey,
+    metadata,
+  });
+
+  await createPaymentAllocations(supabase, [
+    {
+      gatewayPaymentIntentId: intent.id,
+      landlordId: tenancy.landlord_id,
+      tenantId: tenancy.tenant_id,
+      tenancyId: tenancy.id,
+      recipientType: "landlord",
+      recipientProfileId: tenancy.landlord_id,
+      agentPropertyListingId: agentDealAllocation?.listing.id ?? null,
+      amount: landlordShareAmount,
+      currencyCode: tenancy.currency_code,
+      metadata: {
+        source: "gateway_payment_intent_initialized",
+        payment_purpose: params.paymentPurpose,
+        rent_amount: rentAmount,
+        landlord_charges_amount: landlordChargesAmount,
+        landlord_charges: landlordChargesSummary,
+      },
+    },
+    ...(agentCommissionAmount > 0 && agentDealAllocation
+      ? [
+          {
+            gatewayPaymentIntentId: intent.id,
+            landlordId: tenancy.landlord_id,
+            tenantId: tenancy.tenant_id,
+            tenancyId: tenancy.id,
+            recipientType: "agent" as const,
+            recipientProfileId: agentDealAllocation.listing.agent_id,
+            agentPropertyListingId: agentDealAllocation.listing.id,
+            amount: agentCommissionAmount,
+            currencyCode: tenancy.currency_code,
+            metadata: {
+              source: "gateway_payment_intent_initialized",
+              payment_purpose: params.paymentPurpose,
+              agent_paystack_subaccount_code:
+                agentDealAllocation.agentPaystackAccount
+                  ?.paystack_subaccount_code ?? null,
+            },
+          },
+        ]
+      : []),
+    {
+      gatewayPaymentIntentId: intent.id,
+      landlordId: tenancy.landlord_id,
+      tenantId: tenancy.tenant_id,
+      tenancyId: tenancy.id,
+      recipientType: "platform",
+      recipientProfileId: null,
+      agentPropertyListingId: agentDealAllocation?.listing.id ?? null,
+      amount: bopaServiceFeeAmount,
+      currencyCode: tenancy.currency_code,
+      metadata: {
+        source: "gateway_payment_intent_initialized",
+        payment_purpose: params.paymentPurpose,
+        fee_type: "bopa_service_fee",
+        fee_model: RENT_COLLECTION_FEE_MODEL,
+        fee_rate: rentCollectionFee.rate,
+        fee_percentage: bopaServiceFeePercentage,
+        fee_tier: rentCollectionFee.tierLabel,
+        fee_basis: "rent_amount_only",
+        annual_rent_amount: rentCollectionFee.annualRentAmount,
+        rent_payment_amount: rentAmount,
+      },
+    },
+  ]);
+
+  const tenantPaymentUrl = getTenantPaymentUrl(intent.paystack_reference);
+
+  await writeAuditLog({
+    landlordId: tenancy.landlord_id,
+    tenantId: tenancy.tenant_id,
+    tenancyId: tenancy.id,
+    actorProfileId: params.actorProfileId,
+    actorRole: params.actorRole,
+    eventType: AUDIT_EVENT_TYPES.paymentLinkSent,
+    entityType: AUDIT_ENTITY_TYPES.payment,
+    entityId: intent.id,
+    description: params.auditDescription,
+    metadata: {
+      gateway_payment_intent_id: intent.id,
+      paystack_reference: intent.paystack_reference,
+      rent_amount: rentAmount,
+      landlord_charges_amount: landlordChargesAmount,
+      agent_commission_amount: agentCommissionAmount,
+      bopa_service_fee_amount: bopaServiceFeeAmount,
+      bopa_service_fee_percentage: bopaServiceFeePercentage,
+      fee_model: RENT_COLLECTION_FEE_MODEL,
+      annual_rent_amount: rentCollectionFee.annualRentAmount,
+      bopa_collection_fee_rate: rentCollectionFee.rate,
+      bopa_collection_fee_tier: rentCollectionFee.tierLabel,
+      landlord_share_amount: landlordShareAmount,
+      total_amount: totalAmount,
+      period_start: params.periodStart,
+      period_end: params.periodEnd,
+      expires_at: expiresAt,
+      property_name: propertyName,
+      unit_identifier: unitName,
+      payment_purpose: params.paymentPurpose,
+      landlord_charges: landlordChargesSummary,
+      agent_deal: metadata.agent_deal,
+      allocations: metadata.allocations,
+      paystack_split: metadata.paystack_split,
+    },
+  });
+
+  return {
+    tenantId: tenancy.tenant_id,
+    authorizationUrl: intent.authorization_url,
+    accessCode: intent.paystack_access_code,
+    reference: intent.paystack_reference,
+    tenantPaymentUrl,
+    tenantWhatsappNumber: tenantPhone.national,
+    expiresAt,
+    whatsappMessage: buildTenantPaymentMessage({
+      tenantName: tenancy.tenants.full_name,
+      landlordName: "Your landlord",
+      propertyName,
+      unitName,
+      rentAmount,
+      landlordChargesAmount,
+      agentCommissionAmount,
+      bopaServiceFeeAmount,
+      totalAmount,
+      paymentUrl: tenantPaymentUrl,
+      expiresAt,
+    }),
+  };
+}
+
+export async function initializeRentPayment(input: InitializeRentPaymentInput) {
+  const landlord = await requireLandlordPlatformOperator();
+  const supabase = await createSupabaseServerClient();
+
+  const tenancy = await getTenancyPaymentContext(supabase, input.tenancyId);
+
+  if (tenancy.landlord_id !== landlord.id) {
+    throw new AppError(
+      "FORBIDDEN",
+      "You do not have permission to receive payment for this rental agreement.",
+      403,
+    );
+  }
+
+  const adminSupabase = createSupabaseAdminClient();
+  const balance = await getCanonicalTenancyBalance(adminSupabase, tenancy.id);
+
+  assertGatewayRentPaymentAmount({
+    rentAmount: input.amount,
+    outstandingBefore: balance.outstanding_balance,
+  });
+
+  return initializeGatewayPaymentForTenancy({
+    tenancyId: input.tenancyId,
+    amount: input.amount,
+    periodStart: input.periodStart ?? null,
+    periodEnd: input.periodEnd ?? null,
+    idempotencyKey: input.idempotencyKey,
+    paymentPurpose: PAYMENT_PURPOSE_LANDLORD_PREPARED_RENT,
+    auditDescription: "Tenant rent payment link prepared for WhatsApp.",
+    actorProfileId: landlord.id,
+    actorRole: AUDIT_ACTOR_ROLES.landlord,
+    requireAcceptedAgreement: true,
+  });
+}
+
+export async function initializeFirstRentPaymentAfterAgreementAcceptance(params: {
+  tenancyId: string;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const tenancy = await getTenancyPaymentContext(supabase, params.tenancyId);
+
+  const agreement = await getTenancyAgreementByTenancyId(
+    supabase,
+    params.tenancyId,
+  );
+
+  if (agreement?.document_status !== "accepted") {
+    throw new AppError(
+      "AGREEMENT_NOT_ACCEPTED",
+      "Accept the tenancy agreement before making the first rent payment.",
+      400,
+    );
+  }
+
+  return initializeGatewayPaymentForTenancy({
+    tenancyId: params.tenancyId,
+    amount: Number(tenancy.rent_amount),
+    periodStart: null,
+    periodEnd: null,
+    idempotencyKey: createPaymentIdempotencyKey(),
+    paymentPurpose: PAYMENT_PURPOSE_NEW_TENANT_FIRST_RENT,
+    auditDescription:
+      "First rent payment link automatically prepared after agreement acceptance.",
+    actorProfileId: null,
+    actorRole: AUDIT_ACTOR_ROLES.system,
+    requireAcceptedAgreement: true,
+  });
+}
+
+export async function initializeTenantDashboardRentPayment(params: {
+  idempotencyKey: string;
+}) {
+  const idempotencyKey = params.idempotencyKey.trim();
+
+  if (!idempotencyKey) {
+    throw new AppError(
+      "IDEMPOTENCY_KEY_REQUIRED",
+      "Payment request could not be prepared. Please refresh and try again.",
+      400,
+    );
+  }
+
+  const user = await requireTenant();
+  const supabase = createSupabaseAdminClient();
+
+  const tenant = await getTenantDashboardTenantByProfile(supabase, {
+    profileId: user.id,
+    phoneNumber: user.phoneNumber,
+  });
+
+  if (!tenant) {
+    throw new AppError(
+      "TENANT_RECORD_NOT_FOUND",
+      "We could not find your tenant record.",
+      404,
+    );
+  }
+
+  const tenancy = await getActiveTenantTenancy(supabase, tenant.id);
+
+  if (!tenancy) {
+    throw new AppError(
+      "ACTIVE_TENANCY_NOT_FOUND",
+      "You do not have an active tenancy to pay for.",
+      404,
+    );
+  }
+
+  const balance = await getCanonicalTenancyBalance(supabase, tenancy.id);
+  const payableOutstanding = getPayableOutstandingBalance(
+    balance.outstanding_balance,
+  );
+
+  if (payableOutstanding <= 0) {
+    throw new AppError(
+      "NO_RENT_DUE",
+      "There is no outstanding rent due for this tenancy.",
+      400,
+    );
+  }
+
+  assertGatewayRentPaymentAmount({
+    rentAmount: payableOutstanding,
+    outstandingBefore: balance.outstanding_balance,
+  });
+
+  return initializeGatewayPaymentForTenancy({
+    tenancyId: tenancy.id,
+    amount: payableOutstanding,
+    periodStart: tenancy.current_period_start,
+    periodEnd: tenancy.current_period_end,
+    idempotencyKey,
+    paymentPurpose: PAYMENT_PURPOSE_TENANT_DASHBOARD_RENT,
+    auditDescription: "Tenant dashboard rent payment link prepared.",
+    actorProfileId: user.id,
+    actorRole: AUDIT_ACTOR_ROLES.tenant,
+    requireAcceptedAgreement: true,
+  });
+}
+
+export async function getPublicTenantPaymentCheckout(params: {
+  reference: string;
+  verify?: boolean;
+}) {
+  const supabase = createSupabaseAdminClient();
+
+  if (params.verify) {
+    const intentForVerify = await getGatewayPaymentIntentByReference(
+      supabase,
+      params.reference,
+    );
+
+    if (
+      intentForVerify &&
+      (intentForVerify.status === "initialized" ||
+        (intentForVerify.status === "paid" &&
+          !intentForVerify.processed_payment_id))
+    ) {
+      try {
+        await processVerifiedGatewayPaymentReference(params.reference, {
+          replaySource: "verify_page",
+        });
+      } catch (error) {
+        console.error("Public tenant payment verification failed:", error);
+      }
+    }
+  }
+
+  const intent = await getGatewayPaymentIntentByReference(
+    supabase,
+    params.reference,
+  );
+
+  if (!intent) {
+    return null;
+  }
+
+  const metadata = toRecord(intent.metadata);
+  const landlordPayoutAccount = await getActiveLandlordPaystackAccount(
+    supabase,
+    intent.landlord_id,
+  );
+  const onlinePaymentAvailability = getPaystackPayoutVerificationUiState(
+    landlordPayoutAccount,
+    "tenant",
+  );
+  const expiresAt = getEffectiveExpiry({
+    expiresAt: intent.expires_at,
+    createdAt: intent.created_at,
+  });
+  const isExpired = isPaymentIntentExpired({
+    status: intent.status,
+    expiresAt: intent.expires_at,
+    createdAt: intent.created_at,
+  });
+
+  if (isExpired) {
+    await auditExpiredPaymentLinkOnce({
+      landlordId: intent.landlord_id,
+      tenantId: intent.tenant_id,
+      tenancyId: intent.tenancy_id,
+      intentId: intent.id,
+      reference: intent.paystack_reference,
+      expiresAt,
+    });
+  }
+
+  const receiptDownloadUrl =
+    intent.status === "paid"
+      ? await getTenantRentReceiptDownloadUrlByGatewayReference(
+          intent.paystack_reference,
+        )
+      : null;
+
+  const activation =
+    intent.status === "paid" &&
+    readMetadataBoolean(metadata, "automatic_after_agreement")
+      ? await generateTenantActivationLinkSystem(intent.tenant_id)
+      : null;
+
+  return {
+    id: intent.id,
+    reference: intent.paystack_reference,
+    authorizationUrl: intent.authorization_url,
+    rentAmount: Number(intent.rent_amount),
+    landlordChargesAmount: readMetadataNumber(
+      metadata,
+      "landlord_charges_amount",
+    ),
+    landlordCharges: readMetadataArray(metadata, "landlord_charges"),
+    agentCommissionAmount: readMetadataNumber(
+      metadata,
+      "agent_commission_amount",
+    ),
+    landlordShareAmount: readMetadataNumber(metadata, "landlord_share_amount"),
+    bopaServiceFeeAmount:
+      readMetadataNumber(metadata, "bopa_service_fee_amount") ||
+      Number(intent.tenuro_fee_amount),
+    bopaServiceFeePercentage:
+      readMetadataNumber(metadata, "bopa_service_fee_percentage") ||
+      readMetadataNumber(metadata, "bopa_collection_fee_percentage"),
+    tenuroFeeAmount: Number(intent.tenuro_fee_amount),
+    totalAmount: Number(intent.total_amount),
+    currencyCode: intent.currency_code,
+    status: intent.status,
+    paidAt: intent.paid_at,
+    expiresAt,
+    isExpired,
+    onlinePaymentAvailability,
+    propertyName: readMetadataText(metadata, "property_name"),
+    unitIdentifier: readMetadataText(metadata, "unit_identifier"),
+    periodStart: intent.period_start,
+    periodEnd: intent.period_end,
+    receiptDownloadUrl,
+    activationUrl: activation?.activationUrl ?? null,
+    activationExpiresAt: activation?.expiresAt ?? null,
+  };
+}
+
+
+--------------------------------------------------
+FILE: src\server\services\gateway-payment-idempotency.service.ts
+--------------------------------------------------
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  AUDIT_ENTITY_TYPES,
+  AUDIT_EVENT_TYPES,
+} from "@/server/constants/audit-events";
+import { markPaymentAllocationsPaidForIntent } from "@/server/repositories/payment-allocations.repository";
+import { findPaymentByIdempotencyKey } from "@/server/repositories/payments.repository";
+import { writeSystemAuditLog } from "@/server/services/audit-log.service";
+import { generateRentReceiptSystem } from "@/server/services/receipts.service";
+import { createSupabaseAdminClient } from "@/server/supabase/admin";
+import type { GatewayPaymentIntent } from "@/server/types/paystack.types";
+
+export const PAYSTACK_RENT_PAYMENT_IDEMPOTENCY_PREFIX = "paystack:";
+
+export type GatewayPaymentVerificationPhase =
+  | "settled"
+  | "verifiable"
+  | "terminal_unpaid"
+  | "unknown";
+
+export function buildPaystackRentPaymentIdempotencyKey(paystackReference: string) {
+  return `${PAYSTACK_RENT_PAYMENT_IDEMPOTENCY_PREFIX}${paystackReference}`;
+}
+
+export function getGatewayPaymentVerificationPhase(
+  intent: Pick<GatewayPaymentIntent, "status" | "processed_payment_id">,
+): GatewayPaymentVerificationPhase {
+  if (intent.status === "paid" && intent.processed_payment_id) {
+    return "settled";
+  }
+
+  if (intent.status === "initialized") {
+    return "verifiable";
+  }
+
+  if (
+    intent.status === "failed" ||
+    intent.status === "abandoned" ||
+    intent.status === "cancelled"
+  ) {
+    return "terminal_unpaid";
+  }
+
+  if (intent.status === "paid" && !intent.processed_payment_id) {
+    return "verifiable";
+  }
+
+  return "unknown";
+}
+
+export function shouldVerifyGatewayIntentWithPaystack(
+  intent: Pick<GatewayPaymentIntent, "status" | "processed_payment_id">,
+) {
+  return getGatewayPaymentVerificationPhase(intent) === "verifiable";
+}
+
+export async function findExistingPaystackRentPayment(
+  supabase: SupabaseClient,
+  params: {
+    landlordId: string;
+    paystackReference: string;
+  },
+) {
+  return findPaymentByIdempotencyKey(supabase, {
+    landlordId: params.landlordId,
+    idempotencyKey: buildPaystackRentPaymentIdempotencyKey(params.paystackReference),
+  });
+}
+
+export async function auditGatewayPaymentReplayIgnored(params: {
+  intent: GatewayPaymentIntent;
+  paymentId: string;
+  source: "webhook" | "verify_page" | "landlord_verify" | "reconciliation";
+  reason: string;
+}) {
+  await writeSystemAuditLog({
+    landlordId: params.intent.landlord_id,
+    tenantId: params.intent.tenant_id,
+    tenancyId: params.intent.tenancy_id,
+    eventType: AUDIT_EVENT_TYPES.gatewayPaymentIgnored,
+    entityType: AUDIT_ENTITY_TYPES.payment,
+    entityId: params.paymentId,
+    description: "Duplicate gateway payment processing was safely ignored.",
+    metadata: {
+      audit_subtype: "gateway_payment_replay_ignored",
+      gateway_payment_intent_id: params.intent.id,
+      paystack_reference: params.intent.paystack_reference,
+      payment_id: params.paymentId,
+      source: params.source,
+      reason: params.reason,
+      intent_status: params.intent.status,
+    },
+  });
+}
+
+export async function completeGatewayPaymentAllocationsSafely(params: {
+  gatewayPaymentIntentId: string;
+  rentPaymentId: string;
+}) {
+  try {
+    await markPaymentAllocationsPaidForIntent(createSupabaseAdminClient(), {
+      gatewayPaymentIntentId: params.gatewayPaymentIntentId,
+      rentPaymentId: params.rentPaymentId,
+    });
+  } catch (error) {
+    console.error("Failed to mark payment allocations as paid:", error);
+  }
+}
+
+export async function generateGatewayRentReceiptSafely(paymentId: string) {
+  try {
+    await generateRentReceiptSystem(paymentId);
+  } catch (error) {
+    console.error("Receipt generation failed after gateway payment:", error);
+  }
+}
+
+
+--------------------------------------------------
+FILE: src\server\services\gateway-payment-webhook.service.ts
+--------------------------------------------------
+import "server-only";
+
+import {
+  AUDIT_ENTITY_TYPES,
+  AUDIT_EVENT_TYPES,
+} from "@/server/constants/audit-events";
+import { AppError, isAppError } from "@/server/errors/app-error";
+import { getDeveloperPaymentIntentByReference } from "@/server/repositories/developer-payment-intents.repository";
+import {
+  getGatewayPaymentIntentByReference,
+  markGatewayPaymentIntentFailed,
+  markGatewayPaymentIntentPaid,
+} from "@/server/repositories/gateway-payment.repository";
+import {
+  markGatewayPaymentEventFailed,
+  markGatewayPaymentEventIgnored,
+  markGatewayPaymentEventProcessed,
+  registerGatewayPaymentEvent,
+} from "@/server/repositories/gateway-payment-event.repository";
+import { recordGatewayRentPaymentViaRpc } from "@/server/repositories/payments.repository";
+import { getTenancyPaymentContext } from "@/server/repositories/payment-context.repository";
+import {
+  getUnitById,
+  markUnitOccupied,
+} from "@/server/repositories/units.repository";
+import { writeSystemAuditLog } from "@/server/services/audit-log.service";
+import { verifyAgentTenantProcessingFeeReference } from "@/server/services/agent-processing-fee.service";
+import { verifyAndPostDeveloperPaymentReference } from "@/server/services/developer-payment.service";
+import { verifyTenantApplicationProcessingFeeReference } from "@/server/services/tenant-application-processing-fees.service";
+import {
+  auditGatewayPaymentReplayIgnored,
+  buildPaystackRentPaymentIdempotencyKey,
+  completeGatewayPaymentAllocationsSafely,
+  findExistingPaystackRentPayment,
+  generateGatewayRentReceiptSafely,
+  getGatewayPaymentVerificationPhase,
+  shouldVerifyGatewayIntentWithPaystack,
+} from "@/server/services/gateway-payment-idempotency.service";
+import {
+  convertKoboToNaira,
+  convertNairaToKobo,
+  parsePaystackWebhook,
+  verifyPaystackTransaction,
+  verifyPaystackWebhookSignature,
+} from "@/server/services/paystack.service";
+import { createSupabaseAdminClient } from "@/server/supabase/admin";
+
+export type GatewayPaymentWebhookResult = {
+  status: "processed" | "duplicate" | "ignored" | "failed";
+  message: string;
+  paymentId?: string;
+  gatewayPaymentIntentId?: string;
+  developerPaymentIntentId?: string;
+  developerSalePaymentId?: string;
+  verifiedPayload?: Record<string, unknown>;
+};
+
+function toRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function getErrorMessage(error: unknown) {
+  if (isAppError(error)) {
+    return error.userMessage;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Payment could not be processed.";
+}
+
+function isGatewayIntentNotFoundError(error: unknown) {
+  return isAppError(error) && error.code === "GATEWAY_INTENT_NOT_FOUND";
+}
+
+function assertAmountsMatch(params: {
+  verifiedAmountKobo: number;
+  expectedTotalNaira: number;
+}) {
+  const expectedKobo = convertNairaToKobo(params.expectedTotalNaira);
+  const difference = Math.abs(params.verifiedAmountKobo - expectedKobo);
+
+  if (difference >= 1) {
+    throw new AppError(
+      "PAYSTACK_AMOUNT_MISMATCH",
+      "Payment amount does not match the initialized payment.",
+      400,
+    );
+  }
+}
+
+function mapPaystackStatusToIntentStatus(status: string) {
+  if (status === "failed") {
+    return "failed" as const;
+  }
+
+  if (status === "abandoned") {
+    return "abandoned" as const;
+  }
+
+  return "failed" as const;
+}
+
+function isFirstRentPaymentIntent(metadata: Record<string, unknown>) {
+  return (
+    metadata.payment_purpose === "new_tenant_first_rent" ||
+    metadata.automatic_after_agreement === true
+  );
+}
+
+function isDeveloperPaymentReference(reference: string) {
+  return reference.trim().toUpperCase().startsWith("BPD-");
+}
+
+function getWebhookData(rawPayload: Record<string, unknown>) {
+  return toRecord(rawPayload.data);
+}
+
+function getWebhookMetadata(rawPayload: Record<string, unknown>) {
+  return toRecord(getWebhookData(rawPayload).metadata);
+}
+
+function isDeveloperInstallmentWebhook(params: {
+  reference: string;
+  rawPayload?: Record<string, unknown>;
+}) {
+  if (isDeveloperPaymentReference(params.reference)) {
+    return true;
+  }
+
+  const metadata = params.rawPayload
+    ? getWebhookMetadata(params.rawPayload)
+    : {};
+
+  return (
+    metadata.product === "boldverse_developer_module" ||
+    metadata.payment_type === "developer_installment"
+  );
+}
+
+async function findDeveloperIntentByReferenceSafely(reference: string) {
+  try {
+    return await getDeveloperPaymentIntentByReference(
+      createSupabaseAdminClient(),
+      reference,
+    );
+  } catch (error) {
+    console.error("Failed to resolve developer payment intent:", error);
+    return null;
+  }
+}
+
+async function markUnitOccupiedAfterFirstRentPayment(params: {
+  tenancyId: string;
+  paymentId: string;
+  paystackReference: string;
+}) {
+  const supabase = createSupabaseAdminClient();
+  const tenancy = await getTenancyPaymentContext(supabase, params.tenancyId);
+  const unit = await getUnitById(supabase, tenancy.unit_id);
+
+  if (unit.status === "occupied") {
+    return;
+  }
+
+  if (unit.status !== "reserved" && unit.status !== "vacant") {
+    await writeSystemAuditLog({
+      landlordId: tenancy.landlord_id,
+      tenantId: tenancy.tenant_id,
+      tenancyId: tenancy.id,
+      unitId: tenancy.unit_id,
+      eventType: AUDIT_EVENT_TYPES.unitStatusChanged,
+      entityType: AUDIT_ENTITY_TYPES.unit,
+      entityId: tenancy.unit_id,
+      description:
+        "First rent payment confirmed, but unit status was not changed because the unit is not in a reservable state.",
+      metadata: {
+        payment_id: params.paymentId,
+        paystack_reference: params.paystackReference,
+        current_unit_status: unit.status,
+        expected_statuses: ["reserved", "vacant"],
+        reason: "first_rent_payment_unit_status_not_transitionable",
+      },
+    });
+
+    return;
+  }
+
+  const occupiedUnit = await markUnitOccupied(supabase, tenancy.unit_id);
+
+  await writeSystemAuditLog({
+    landlordId: tenancy.landlord_id,
+    tenantId: tenancy.tenant_id,
+    tenancyId: tenancy.id,
+    unitId: tenancy.unit_id,
+    eventType: AUDIT_EVENT_TYPES.unitStatusChanged,
+    entityType: AUDIT_ENTITY_TYPES.unit,
+    entityId: tenancy.unit_id,
+    description: `${occupiedUnit.unit_identifier} was marked occupied after first rent payment.`,
+    metadata: {
+      payment_id: params.paymentId,
+      paystack_reference: params.paystackReference,
+      previous_unit_status: unit.status,
+      new_unit_status: occupiedUnit.status,
+      reason: "first_rent_payment_confirmed",
+    },
+  });
+}
+
+async function markUnitOccupiedAfterFirstRentPaymentSafely(params: {
+  tenancyId: string;
+  paymentId: string;
+  paystackReference: string;
+}) {
+  try {
+    await markUnitOccupiedAfterFirstRentPayment(params);
+  } catch (error) {
+    console.error(
+      "Failed to mark unit occupied after first rent payment:",
+      error,
+    );
+  }
+}
+
+async function finalizeGatewayPaymentSettlement(params: {
+  intent: Awaited<ReturnType<typeof getGatewayPaymentIntentByReference>>;
+  paymentId: string;
+  isReplay: boolean;
+  replaySource?:
+    | "webhook"
+    | "verify_page"
+    | "landlord_verify"
+    | "reconciliation";
+}) {
+  if (!params.intent) {
+    return;
+  }
+
+  await completeGatewayPaymentAllocationsSafely({
+    gatewayPaymentIntentId: params.intent.id,
+    rentPaymentId: params.paymentId,
+  });
+
+  if (isFirstRentPaymentIntent(params.intent.metadata)) {
+    await markUnitOccupiedAfterFirstRentPaymentSafely({
+      tenancyId: params.intent.tenancy_id,
+      paymentId: params.paymentId,
+      paystackReference: params.intent.paystack_reference,
+    });
+  }
+
+  await generateGatewayRentReceiptSafely(params.paymentId);
+
+  if (params.isReplay && params.replaySource === "webhook") {
+    await auditGatewayPaymentReplayIgnored({
+      intent: params.intent,
+      paymentId: params.paymentId,
+      source: params.replaySource,
+      reason: "payment_already_settled",
+    });
+  }
+}
+
+async function returnDuplicateGatewayPaymentResult(params: {
+  intent: NonNullable<
+    Awaited<ReturnType<typeof getGatewayPaymentIntentByReference>>
+  >;
+  paymentId: string;
+  replaySource?:
+    | "webhook"
+    | "verify_page"
+    | "landlord_verify"
+    | "reconciliation";
+}) {
+  await finalizeGatewayPaymentSettlement({
+    intent: params.intent,
+    paymentId: params.paymentId,
+    isReplay: true,
+    replaySource: params.replaySource,
+  });
+
+  return {
+    status: "duplicate" as const,
+    message: "Gateway payment already recorded.",
+    paymentId: params.paymentId,
+    gatewayPaymentIntentId: params.intent.id,
+  };
+}
+
+export async function processVerifiedGatewayPaymentReference(
+  reference: string,
+  options?: {
+    replaySource?:
+      | "webhook"
+      | "verify_page"
+      | "landlord_verify"
+      | "reconciliation";
+  },
+): Promise<GatewayPaymentWebhookResult> {
+  const supabase = createSupabaseAdminClient();
+  const intent = await getGatewayPaymentIntentByReference(supabase, reference);
+
+  if (!intent) {
+    throw new AppError(
+      "GATEWAY_INTENT_NOT_FOUND",
+      "Payment reference was not found in BOPA.",
+      404,
+    );
+  }
+
+  const phase = getGatewayPaymentVerificationPhase(intent);
+
+  if (phase === "settled" && intent.processed_payment_id) {
+    return returnDuplicateGatewayPaymentResult({
+      intent,
+      paymentId: intent.processed_payment_id,
+      replaySource: options?.replaySource,
+    });
+  }
+
+  const existingPayment = await findExistingPaystackRentPayment(supabase, {
+    landlordId: intent.landlord_id,
+    paystackReference: intent.paystack_reference,
+  });
+
+  if (existingPayment) {
+    if (
+      intent.status !== "paid" ||
+      intent.processed_payment_id !== existingPayment.id
+    ) {
+      await markGatewayPaymentIntentPaid(supabase, {
+        intentId: intent.id,
+        paymentId: existingPayment.id,
+        paidAt: intent.paid_at ?? new Date().toISOString(),
+        verifiedPayload: intent.verified_payload ?? {},
+      });
+    }
+
+    return returnDuplicateGatewayPaymentResult({
+      intent,
+      paymentId: existingPayment.id,
+      replaySource: options?.replaySource ?? "reconciliation",
+    });
+  }
+
+  if (phase === "terminal_unpaid") {
+    return {
+      status: "ignored",
+      message: "Payment intent is no longer eligible for verification.",
+      gatewayPaymentIntentId: intent.id,
+    };
+  }
+
+  if (!shouldVerifyGatewayIntentWithPaystack(intent)) {
+    return {
+      status: "ignored",
+      message: "Payment intent is not in a verifiable state.",
+      gatewayPaymentIntentId: intent.id,
+    };
+  }
+
+  const verifiedTransaction = await verifyPaystackTransaction(reference);
+  const verifiedPayload = toRecord(verifiedTransaction);
+
+  if (verifiedTransaction.reference !== intent.paystack_reference) {
+    throw new AppError(
+      "PAYSTACK_REFERENCE_MISMATCH",
+      "Payment reference does not match the initialized payment.",
+      400,
+    );
+  }
+
+  if (verifiedTransaction.currency !== intent.currency_code) {
+    throw new AppError(
+      "PAYSTACK_CURRENCY_MISMATCH",
+      "Payment currency does not match the initialized payment.",
+      400,
+    );
+  }
+
+  if (verifiedTransaction.status !== "success") {
+    const failedStatus = mapPaystackStatusToIntentStatus(
+      verifiedTransaction.status,
+    );
+
+    await markGatewayPaymentIntentFailed(supabase, {
+      intentId: intent.id,
+      status: failedStatus,
+      reason: `Paystack transaction status: ${verifiedTransaction.status}`,
+      verifiedPayload,
+    });
+
+    await writeSystemAuditLog({
+      landlordId: intent.landlord_id,
+      tenantId: intent.tenant_id,
+      tenancyId: intent.tenancy_id,
+      eventType: AUDIT_EVENT_TYPES.gatewayPaymentFailed,
+      entityType: AUDIT_ENTITY_TYPES.payment,
+      entityId: intent.id,
+      description: "Paystack gateway payment was not successful.",
+      metadata: {
+        gateway_payment_intent_id: intent.id,
+        paystack_reference: intent.paystack_reference,
+        paystack_status: verifiedTransaction.status,
+        expected_total_amount: intent.total_amount,
+        verified_amount_kobo: verifiedTransaction.amount,
+        agent_deal: intent.metadata.agent_deal ?? null,
+        allocations: intent.metadata.allocations ?? null,
+      },
+    });
+
+    return {
+      status: "ignored",
+      message: "Payment was not successful.",
+      gatewayPaymentIntentId: intent.id,
+      verifiedPayload,
+    };
+  }
+
+  assertAmountsMatch({
+    verifiedAmountKobo: verifiedTransaction.amount,
+    expectedTotalNaira: intent.total_amount,
+  });
+
+  const idempotencyKey = buildPaystackRentPaymentIdempotencyKey(
+    intent.paystack_reference,
+  );
+
+  const paymentId = await recordGatewayRentPaymentViaRpc(supabase, {
+    tenancyId: intent.tenancy_id,
+    amountPaid: intent.rent_amount,
+    paymentReference: intent.paystack_reference,
+    paymentDate: verifiedTransaction.paid_at ?? new Date().toISOString(),
+    periodStart: intent.period_start,
+    periodEnd: intent.period_end,
+    idempotencyKey,
+  });
+
+  await markGatewayPaymentIntentPaid(supabase, {
+    intentId: intent.id,
+    paymentId,
+    paidAt: verifiedTransaction.paid_at ?? new Date().toISOString(),
+    verifiedPayload,
+  });
+
+  const shouldRecordVerificationAudit =
+    intent.status !== "paid" || !intent.processed_payment_id;
+
+  if (shouldRecordVerificationAudit) {
+    await writeSystemAuditLog({
+      landlordId: intent.landlord_id,
+      tenantId: intent.tenant_id,
+      tenancyId: intent.tenancy_id,
+      eventType: AUDIT_EVENT_TYPES.gatewayPaymentVerified,
+      entityType: AUDIT_ENTITY_TYPES.payment,
+      entityId: paymentId,
+      description: "Paystack gateway payment verified.",
+      metadata: {
+        payment_id: paymentId,
+        gateway_payment_intent_id: intent.id,
+        paystack_reference: intent.paystack_reference,
+        amount_paid: intent.rent_amount,
+        total_amount: intent.total_amount,
+        verified_amount_kobo: verifiedTransaction.amount,
+        paid_at: verifiedTransaction.paid_at,
+        period_start: intent.period_start,
+        period_end: intent.period_end,
+        agent_deal: intent.metadata.agent_deal ?? null,
+        allocations: intent.metadata.allocations ?? null,
+      },
+    });
+  }
+
+  await finalizeGatewayPaymentSettlement({
+    intent,
+    paymentId,
+    isReplay: !shouldRecordVerificationAudit,
+    replaySource: options?.replaySource,
+  });
+
+  return {
+    status: shouldRecordVerificationAudit ? "processed" : "duplicate",
+    message: shouldRecordVerificationAudit
+      ? `Gateway payment of ₦${convertKoboToNaira(
+          verifiedTransaction.amount,
+        ).toLocaleString("en-NG")} confirmed.`
+      : "Gateway payment already recorded.",
+    paymentId,
+    gatewayPaymentIntentId: intent.id,
+    verifiedPayload,
+  };
+}
+
+function isProcessingFeeNotFoundError(error: unknown) {
+  return (
+    isAppError(error) &&
+    (error.code === "AGENT_PROCESSING_FEE_NOT_FOUND" ||
+      error.code === "TENANT_APPLICATION_PROCESSING_FEE_NOT_FOUND")
+  );
+}
+
+async function processVerifiedDeveloperPaymentReference(reference: string) {
+  const supabase = createSupabaseAdminClient();
+
+  const result = await verifyAndPostDeveloperPaymentReference({
+    supabase,
+    reference,
+  });
+
+  return {
+    status: result.status === "duplicate" ? "duplicate" : "processed",
+    message:
+      result.status === "duplicate"
+        ? "Developer payment already recorded."
+        : "Developer payment confirmed.",
+    paymentId: result.paymentId,
+    developerPaymentIntentId: result.paymentIntentId,
+    developerSalePaymentId: result.paymentId,
+    verifiedPayload: result.verifiedPayload,
+  } satisfies GatewayPaymentWebhookResult;
+}
+
+async function processVerifiedPaystackReferenceWithFallback(
+  reference: string,
+  options?: {
+    replaySource?:
+      | "webhook"
+      | "verify_page"
+      | "landlord_verify"
+      | "reconciliation";
+    rawPayload?: Record<string, unknown>;
+  },
+) {
+  try {
+    return await processVerifiedGatewayPaymentReference(reference, options);
+  } catch (error) {
+    if (!isGatewayIntentNotFoundError(error)) {
+      throw error;
+    }
+
+    try {
+      const processingFeeIntent =
+        await verifyAgentTenantProcessingFeeReference(reference);
+
+      return {
+        status: "processed" as const,
+        message: "Agent tenant processing fee confirmed.",
+        paymentId: processingFeeIntent.id,
+      };
+    } catch (agentError) {
+      if (!isProcessingFeeNotFoundError(agentError)) {
+        throw agentError;
+      }
+    }
+
+    try {
+      const tenantApplicationProcessingFeeIntent =
+        await verifyTenantApplicationProcessingFeeReference(reference);
+
+      return {
+        status: "processed" as const,
+        message: "Tenant application processing fee confirmed.",
+        paymentId: tenantApplicationProcessingFeeIntent.id,
+      };
+    } catch (tenantApplicationError) {
+      if (!isProcessingFeeNotFoundError(tenantApplicationError)) {
+        throw tenantApplicationError;
+      }
+
+      if (
+        isDeveloperInstallmentWebhook({
+          reference,
+          rawPayload: options?.rawPayload,
+        })
+      ) {
+        return processVerifiedDeveloperPaymentReference(reference);
+      }
+
+      throw tenantApplicationError;
+    }
+  }
+}
+
+async function resolveDuplicateWebhookEvent(params: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  registeredEvent: Awaited<ReturnType<typeof registerGatewayPaymentEvent>>;
+  paymentReference: string;
+}): Promise<GatewayPaymentWebhookResult | null> {
+  if (!params.registeredEvent.isDuplicate) {
+    return null;
+  }
+
+  if (
+    params.registeredEvent.event.processing_status === "processed" &&
+    (params.registeredEvent.event.processed_payment_id ||
+      params.registeredEvent.event.developer_sale_payment_id)
+  ) {
+    return {
+      status: "duplicate",
+      message: "Payment webhook already processed.",
+      paymentId:
+        params.registeredEvent.event.processed_payment_id ??
+        params.registeredEvent.event.developer_sale_payment_id ??
+        undefined,
+      gatewayPaymentIntentId:
+        params.registeredEvent.event.gateway_payment_intent_id ?? undefined,
+      developerPaymentIntentId:
+        params.registeredEvent.event.developer_payment_intent_id ?? undefined,
+      developerSalePaymentId:
+        params.registeredEvent.event.developer_sale_payment_id ?? undefined,
+    };
+  }
+
+  if (params.registeredEvent.event.processing_status === "ignored") {
+    return {
+      status: "duplicate",
+      message: "Payment webhook was already ignored.",
+    };
+  }
+
+  const intent = await getGatewayPaymentIntentByReference(
+    params.supabase,
+    params.paymentReference,
+  );
+
+  if (intent?.status === "paid" && intent.processed_payment_id) {
+    await markGatewayPaymentEventProcessed(params.supabase, {
+      eventId: params.registeredEvent.event.id,
+      gatewayPaymentIntentId: intent.id,
+      processedPaymentId: intent.processed_payment_id,
+      verifiedPayload: intent.verified_payload ?? {},
+    });
+
+    return {
+      status: "duplicate",
+      message: "Payment webhook already processed.",
+      paymentId: intent.processed_payment_id,
+      gatewayPaymentIntentId: intent.id,
+    };
+  }
+
+  const existingPayment =
+    intent &&
+    (await findExistingPaystackRentPayment(params.supabase, {
+      landlordId: intent.landlord_id,
+      paystackReference: intent.paystack_reference,
+    }));
+
+  if (existingPayment && intent) {
+    await markGatewayPaymentEventProcessed(params.supabase, {
+      eventId: params.registeredEvent.event.id,
+      gatewayPaymentIntentId: intent.id,
+      processedPaymentId: existingPayment.id,
+      verifiedPayload: intent.verified_payload ?? {},
+    });
+
+    return {
+      status: "duplicate",
+      message: "Payment webhook already processed.",
+      paymentId: existingPayment.id,
+      gatewayPaymentIntentId: intent.id,
+    };
+  }
+
+  return null;
+}
+
+export async function processGatewayPaystackWebhook(params: {
+  rawBody: string;
+  signature: string | null;
+}): Promise<GatewayPaymentWebhookResult> {
+  verifyPaystackWebhookSignature({
+    rawBody: params.rawBody,
+    signature: params.signature,
+  });
+
+  const webhook = parsePaystackWebhook(params.rawBody);
+  const rawPayload = JSON.parse(params.rawBody) as Record<string, unknown>;
+  const supabase = createSupabaseAdminClient();
+
+  const registeredEvent = await registerGatewayPaymentEvent(supabase, {
+    eventType: webhook.event,
+    paymentReference: webhook.data.reference,
+    rawPayload,
+    signature: params.signature ?? "",
+  });
+
+  const duplicateResult = await resolveDuplicateWebhookEvent({
+    supabase,
+    registeredEvent,
+    paymentReference: webhook.data.reference,
+  });
+
+  if (duplicateResult) {
+    return duplicateResult;
+  }
+
+  try {
+    if (webhook.event !== "charge.success") {
+      const ignoredIntent = await getGatewayPaymentIntentByReference(
+        supabase,
+        webhook.data.reference,
+      );
+
+      await markGatewayPaymentEventIgnored(supabase, {
+        eventId: registeredEvent.event.id,
+        reason: `Unsupported Paystack event: ${webhook.event}`,
+        gatewayPaymentIntentId: ignoredIntent?.id ?? null,
+        verifiedPayload: rawPayload,
+      });
+
+      await writeSystemAuditLog({
+        landlordId: ignoredIntent?.landlord_id ?? null,
+        tenantId: ignoredIntent?.tenant_id ?? null,
+        tenancyId: ignoredIntent?.tenancy_id ?? null,
+        eventType: AUDIT_EVENT_TYPES.gatewayPaymentIgnored,
+        entityType: AUDIT_ENTITY_TYPES.payment,
+        entityId: ignoredIntent?.id ?? registeredEvent.event.id,
+        description: `Unsupported Paystack webhook ignored: ${webhook.event}.`,
+        metadata: {
+          gateway_payment_intent_id: ignoredIntent?.id ?? null,
+          gateway_payment_event_id: registeredEvent.event.id,
+          paystack_reference: webhook.data.reference,
+          webhook_event: webhook.event,
+          agent_deal: ignoredIntent?.metadata.agent_deal ?? null,
+          allocations: ignoredIntent?.metadata.allocations ?? null,
+        },
+      });
+
+      return {
+        status: "ignored",
+        message: "Webhook ignored.",
+        gatewayPaymentIntentId: ignoredIntent?.id ?? undefined,
+      };
+    }
+
+    const result = await processVerifiedPaystackReferenceWithFallback(
+      webhook.data.reference,
+      {
+        replaySource: "webhook",
+        rawPayload,
+      },
+    );
+
+    const intent = await getGatewayPaymentIntentByReference(
+      supabase,
+      webhook.data.reference,
+    );
+
+    await markGatewayPaymentEventProcessed(supabase, {
+      eventId: registeredEvent.event.id,
+      gatewayPaymentIntentId:
+        result.gatewayPaymentIntentId ?? intent?.id ?? null,
+      developerPaymentIntentId: result.developerPaymentIntentId ?? null,
+      developerSalePaymentId: result.developerSalePaymentId ?? null,
+      processedPaymentId: result.paymentId ?? null,
+      verifiedPayload:
+        result.verifiedPayload ?? intent?.verified_payload ?? rawPayload,
+    });
+
+    return result;
+  } catch (error) {
+    const message = getErrorMessage(error);
+
+    const failedIntent = await getGatewayPaymentIntentByReference(
+      supabase,
+      webhook.data.reference,
+    );
+
+    const failedDeveloperIntent =
+      failedIntent === null &&
+      isDeveloperInstallmentWebhook({
+        reference: webhook.data.reference,
+        rawPayload,
+      })
+        ? await findDeveloperIntentByReferenceSafely(webhook.data.reference)
+        : null;
+
+    await markGatewayPaymentEventFailed(supabase, {
+      eventId: registeredEvent.event.id,
+      reason: message,
+      gatewayPaymentIntentId: failedIntent?.id ?? null,
+      developerPaymentIntentId: failedDeveloperIntent?.id ?? null,
+      developerSalePaymentId:
+        failedDeveloperIntent?.processed_payment_id ?? null,
+      verifiedPayload: rawPayload,
+    });
+
+    await writeSystemAuditLog({
+      landlordId: failedIntent?.landlord_id ?? null,
+      tenantId: failedIntent?.tenant_id ?? null,
+      tenancyId: failedIntent?.tenancy_id ?? null,
+      eventType: AUDIT_EVENT_TYPES.gatewayPaymentFailed,
+      entityType: AUDIT_ENTITY_TYPES.payment,
+      entityId:
+        failedIntent?.id ??
+        failedDeveloperIntent?.id ??
+        registeredEvent.event.id,
+      description: "Paystack webhook processing failed.",
+      metadata: {
+        gateway_payment_intent_id: failedIntent?.id ?? null,
+        developer_payment_intent_id: failedDeveloperIntent?.id ?? null,
+        developer_sale_payment_id:
+          failedDeveloperIntent?.processed_payment_id ?? null,
+        gateway_payment_event_id: registeredEvent.event.id,
+        paystack_reference: webhook.data.reference,
+        webhook_event: webhook.event,
+        failure_reason: message,
+        agent_deal: failedIntent?.metadata.agent_deal ?? null,
+        allocations: failedIntent?.metadata.allocations ?? null,
+      },
+    });
+
+    return {
+      status: "failed",
+      message,
+      gatewayPaymentIntentId: failedIntent?.id ?? undefined,
+      developerPaymentIntentId: failedDeveloperIntent?.id ?? undefined,
+      developerSalePaymentId:
+        failedDeveloperIntent?.processed_payment_id ?? undefined,
+    };
+  }
+}
+
+
+--------------------------------------------------
+FILE: src\server\services\paystack-verification.service.ts
+--------------------------------------------------
+import "server-only";
+
+import {
+  buildLandlordPaymentGateUiState,
+  getLandlordPaymentGateUiStateFromErrorCode,
+  type LandlordPaymentGateUiState,
+} from "@/lib/landlord-payment-gate";
+import type {
+  PaystackPayoutVerificationState,
+  PayoutVerificationStatusPayload,
+} from "@/lib/payout-verification";
+import { AppError } from "@/server/errors/app-error";
+import { getActiveAgentPaystackAccount } from "@/server/repositories/agent-paystack.repository";
+import { getActiveLandlordPaystackAccount } from "@/server/repositories/landlord-paystack.repository";
+import { getSessionUser } from "@/server/services/auth.service";
+import { createSupabaseServerClient } from "@/server/supabase/server";
+import type {
+  AgentPaystackAccount,
+  LandlordPaystackAccount,
+  PaystackVerificationStatus,
+} from "@/server/types/paystack.types";
+
+export type { LandlordPaymentGateUiState };
+
+export type { PaystackPayoutVerificationState, PayoutVerificationStatusPayload };
+
+export type PaystackPayoutVerificationAudience =
+  | "landlord"
+  | "agent"
+  | "tenant";
+
+export type PaystackPayoutVerificationUiState = {
+  state: PaystackPayoutVerificationState;
+  isVerified: boolean;
+  badgeLabel:
+    | "Not Connected"
+    | "Pending Verification"
+    | "Verified"
+    | "Verification Failed";
+  badgeTone: "success" | "warning" | "danger" | "neutral";
+  guidance: string;
+};
+
+type PaystackPayoutAccountVerificationFields = {
+  verification_status: PaystackVerificationStatus;
+  verified_at: string | null;
+};
+
+export function buildPayoutVerificationStatusPayload(
+  account:
+    | (PaystackPayoutAccountVerificationFields & {
+        updated_at?: string | null;
+      })
+    | null,
+): PayoutVerificationStatusPayload {
+  return {
+    state: getPaystackPayoutVerificationState(account),
+    verifiedAt: account?.verified_at ?? null,
+    updatedAt: account?.updated_at ?? null,
+  };
+}
+
+export async function getCurrentPayoutVerificationStatus(): Promise<PayoutVerificationStatusPayload> {
+  const user = await getSessionUser();
+
+  if (!user || (user.role !== "landlord" && user.role !== "agent")) {
+    throw new AppError(
+      "UNAUTHORIZED",
+      "You must be signed in as a landlord or agent to check payout verification status.",
+      401,
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const account =
+    user.role === "agent"
+      ? await getActiveAgentPaystackAccount(supabase, user.id)
+      : await getActiveLandlordPaystackAccount(supabase, user.id);
+
+  return buildPayoutVerificationStatusPayload(account);
+}
+
+export function getPaystackPayoutVerificationState(
+  account: PaystackPayoutAccountVerificationFields | null,
+): PaystackPayoutVerificationState {
+  if (!account) {
+    return "missing";
+  }
+
+  if (account.verification_status === "failed") {
+    return "failed";
+  }
+
+  if (account.verification_status === "verified" && account.verified_at) {
+    return "verified";
+  }
+
+  return "unverified";
+}
+
+export function isPaystackPayoutVerified(
+  account: PaystackPayoutAccountVerificationFields | null,
+) {
+  return getPaystackPayoutVerificationState(account) === "verified";
+}
+
+export function getPaystackPayoutVerificationUiState(
+  account: PaystackPayoutAccountVerificationFields | null,
+  audience: PaystackPayoutVerificationAudience,
+): PaystackPayoutVerificationUiState {
+  const state = getPaystackPayoutVerificationState(account);
+
+  if (state === "verified") {
+    return {
+      state,
+      isVerified: true,
+      badgeLabel: "Verified",
+      badgeTone: "success",
+      guidance:
+        audience === "agent"
+          ? "Split payouts are enabled."
+          : "Online rent collection is enabled.",
+    };
+  }
+
+  if (state === "failed") {
+    return {
+      state,
+      isVerified: false,
+      badgeLabel: "Verification Failed",
+      badgeTone: "danger",
+      guidance:
+        audience === "tenant"
+          ? "Online payment is temporarily unavailable. Please contact your landlord."
+          : audience === "agent"
+            ? "Your payout account verification failed. Please update your payout details."
+            : "Verification failed. Please update your payout details or contact support.",
+    };
+  }
+
+  if (state === "missing") {
+    return {
+      state,
+      isVerified: false,
+      badgeLabel: "Not Connected",
+      badgeTone: "neutral",
+      guidance:
+        audience === "tenant"
+          ? "Online payment is temporarily unavailable. Please contact your landlord."
+          : audience === "agent"
+            ? "Connect your payout account before split payouts can be enabled."
+            : "Connect your payout account before online rent payments can be enabled.",
+    };
+  }
+
+  return {
+    state,
+    isVerified: false,
+    badgeLabel: "Pending Verification",
+    badgeTone: "warning",
+    guidance:
+      audience === "tenant"
+        ? "Online payment is temporarily unavailable. Please contact your landlord."
+        : audience === "agent"
+          ? "Split payouts are disabled until verification is completed."
+          : "Online rent payments are disabled until payout verification is approved.",
+  };
+}
+
+export function getFriendlyPayoutVerificationErrorMessage(code: string) {
+  const gate = getLandlordPaymentGateUiStateFromErrorCode(code);
+
+  if (gate) {
+    return gate.description;
+  }
+
+  if (code === "AGENT_BANK_ACCOUNT_REQUIRED") {
+    return "The agent payout account is not ready yet. Split payout actions are unavailable until the agent connects a payout account.";
+  }
+
+  if (code === "AGENT_PAYOUT_ACCOUNT_PENDING_VERIFICATION") {
+    return "The agent payout account is pending verification. Split payout actions will be available once verification is approved.";
+  }
+
+  if (code === "AGENT_PAYOUT_ACCOUNT_VERIFICATION_FAILED") {
+    return "The agent payout account verification failed. Split payout actions are unavailable until the payout details are updated.";
+  }
+
+  return null;
+}
+
+export function getLandlordPaymentGateUiState(
+  account: PaystackPayoutAccountVerificationFields | null,
+): LandlordPaymentGateUiState | null {
+  const state = getPaystackPayoutVerificationState(account);
+
+  if (state === "verified") {
+    return null;
+  }
+
+  return buildLandlordPaymentGateUiState(state);
+}
+
+function createLandlordPayoutVerificationError(
+  state: Exclude<PaystackPayoutVerificationState, "verified">,
+) {
+  if (state === "missing") {
+    return new AppError(
+      "BANK_ACCOUNT_REQUIRED",
+      "The landlord payout account is not ready for online rent payment.",
+      400,
+    );
+  }
+
+  if (state === "failed") {
+    return new AppError(
+      "PAYOUT_ACCOUNT_VERIFICATION_FAILED",
+      "Payout account verification failed. Online rent payments are unavailable until the account is reviewed.",
+      400,
+    );
+  }
+
+  return new AppError(
+    "PAYOUT_ACCOUNT_PENDING_VERIFICATION",
+    "Payout account pending verification. Online rent payments will be available once verified.",
+    400,
+  );
+}
+
+function createAgentPayoutVerificationError(
+  state: Exclude<PaystackPayoutVerificationState, "verified">,
+) {
+  if (state === "missing") {
+    return new AppError(
+      "AGENT_BANK_ACCOUNT_REQUIRED",
+      "The agent payout account is not ready for commission split.",
+      400,
+    );
+  }
+
+  if (state === "failed") {
+    return new AppError(
+      "AGENT_PAYOUT_ACCOUNT_VERIFICATION_FAILED",
+      "Agent payout account verification failed. Commission payments are unavailable until the account is reviewed.",
+      400,
+    );
+  }
+
+  return new AppError(
+    "AGENT_PAYOUT_ACCOUNT_PENDING_VERIFICATION",
+    "Agent payout account pending verification. Commission payments are unavailable until verified.",
+    400,
+  );
+}
+
+export function assertLandlordPayoutVerified(
+  account: LandlordPaystackAccount | null,
+): LandlordPaystackAccount {
+  const state = getPaystackPayoutVerificationState(account);
+
+  if (state !== "verified") {
+    throw createLandlordPayoutVerificationError(state);
+  }
+
+  if (!account) {
+    throw createLandlordPayoutVerificationError("missing");
+  }
+
+  return account;
+}
+
+export function assertAgentPayoutVerified(
+  account: AgentPaystackAccount | null,
+): AgentPaystackAccount {
+  const state = getPaystackPayoutVerificationState(account);
+
+  if (state !== "verified") {
+    throw createAgentPayoutVerificationError(state);
+  }
+
+  if (!account) {
+    throw createAgentPayoutVerificationError("missing");
+  }
+
+  return account;
+}
+

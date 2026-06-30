@@ -1,0 +1,272 @@
+﻿PIEDRAS REMAINING BRAND / BOPA REFERENCES AFTER CLEANUP
+Generated: 06/29/2026 15:27:56
+
+
+--------------------------------------------------
+FILE: src\app\developer\settings\page.tsx
+--------------------------------------------------
+Line 47:         "Buyer payments will be processed securely. Your sale amount goes to your approved bank account, while BOPA keeps only the processing fee.",
+
+--------------------------------------------------
+FILE: src\components\developer\developer-buyer-sale-portal-view.tsx
+--------------------------------------------------
+Line 579:                   <th className="py-3 pr-4 font-black">BOPA Processing Fee</th>
+
+--------------------------------------------------
+FILE: src\components\developer\developer-payment-checkout-status.tsx
+--------------------------------------------------
+Line 30:       description="Review the payment amount and BOPA processing fee before continuing to Paystack."
+Line 55:             BOPA processing fee
+
+--------------------------------------------------
+FILE: src\components\developer\developer-register-form.tsx
+--------------------------------------------------
+Line 25:         description="This account is separate from Piedras landlord access and is built for estate sales, buyer records, plot inventory, and payment tracking."
+
+--------------------------------------------------
+FILE: src\components\developer\developer-sale-detail.tsx
+--------------------------------------------------
+Line 226:                   <th className="py-3 pr-4 font-black">BOPA fee</th>
+
+--------------------------------------------------
+FILE: src\components\ui\button.tsx
+--------------------------------------------------
+Line 2: import { PiedrasLoaderIcon } from "@/components/ui/bopa-loader";
+
+--------------------------------------------------
+FILE: src\lib\whatsapp-messages.ts
+--------------------------------------------------
+Line 50: export function buildTenantContactWhatsappMessage(params: {
+Line 51:   tenantName: string;
+Line 55:     `Good day ${params.tenantName}.`,
+Line 56:     `This is a message from your landlord about ${params.propertyUnitLabel} on Piedras.`,
+
+--------------------------------------------------
+FILE: src\server\constants\audit-events.ts
+--------------------------------------------------
+Line 3:   landlord: "landlord",
+Line 4:   tenant: "tenant",
+Line 5:   agent: "agent",
+Line 10:   tenant: "tenant",
+Line 16:   agentPropertyListing: "agent_property_listing",
+Line 29:   tenantCreated: "tenant.created",
+Line 30:   onboardingLinkSent: "tenant.onboarding_link_sent",
+Line 31:   tenantKycSubmitted: "tenant.kyc_submitted",
+Line 32:   tenantAutoDeclined: "tenant.auto_declined",
+Line 33:   tenantKycFlaggedForReview: "tenant.kyc_flagged_for_review",
+Line 34:   tenantApproved: "tenant.approved",
+Line 35:   tenantRejected: "tenant.rejected",
+Line 36:   tenantWaitlisted: "tenant.waitlisted",
+Line 44:   propertyApplicationTenantRejected:
+Line 45:     "property_application.tenant_rejected_apartment",
+Line 46:   propertyApplicationConvertedToTenant:
+Line 47:     "property_application.converted_to_tenant",
+Line 49:   agentKycDraftSaved: "agent.kyc_draft_saved",
+Line 50:   agentVerificationFeeInitialized: "agent.verification_fee_initialized",
+Line 51:   agentVerificationFeePaid: "agent.verification_fee_paid",
+Line 52:   agentOnboardingSubmitted: "agent.onboarding_submitted",
+Line 54:   landlordTrialStarted: "landlord.trial_started",
+Line 55:   landlordVerificationFeeInitialized: "landlord.verification_fee_initialized",
+Line 56:   landlordVerificationFeePaid: "landlord.verification_fee_paid",
+Line 57:   landlordOnboardingSubmitted: "landlord.onboarding_submitted",
+Line 58:   landlordWaitlisted: "landlord.waitlisted",
+Line 59:   tenantUpdated: "tenant.updated",
+Line 60:   tenantArchived: "tenant.archived",
+Line 61:   tenantAccountActivated: "tenant.account_activated",
+Line 110:   tenantMoveOutRequested: "tenant.move_out_requested",
+
+--------------------------------------------------
+FILE: src\server\errors\error-map.ts
+--------------------------------------------------
+Line 9:     "This onboarding link has expired. Please ask your landlord for a new link.",
+
+--------------------------------------------------
+FILE: src\server\pdf\developer-payment-receipt-pdf.tsx
+--------------------------------------------------
+Line 20:   bopaProcessingFee: string;
+Line 309:             <Text style={styles.amountLabel}>BOPA PROCESSING FEE</Text>
+Line 310:             <MoneyText value={data.bopaProcessingFee} size={12} />
+Line 376: // BOPA Processing Fee ✅
+Line 402: // After that, download the receipt again. It should show the developer company name, BOPA processing fee, corrected Naira display, and only the useful outstanding balance.
+
+--------------------------------------------------
+FILE: src\server\repositories\gateway-payment.repository.ts
+--------------------------------------------------
+Line 6:   landlord_id,
+Line 7:   tenant_id,
+Line 13:   tenuro_fee_amount,
+Line 33:     landlordId: string;
+Line 40:     .eq("landlord_id", params.landlordId)
+Line 71:     landlordId: string;
+Line 72:     tenantId: string;
+Line 78:     tenuroFeeAmount: number;
+Line 91:       landlord_id: params.landlordId,
+Line 92:       tenant_id: params.tenantId,
+Line 98:       tenuro_fee_amount: params.tenuroFeeAmount,
+Line 312: export async function getGatewayPaymentIntentsForTenant(
+Line 314:   tenantId: string,
+Line 319:     .eq("tenant_id", tenantId)
+
+--------------------------------------------------
+FILE: src\server\services\audit-log.service.ts
+--------------------------------------------------
+Line 9:   landlordId?: string | null;
+Line 10:   tenantId?: string | null;
+Line 22:   userAgent?: string | null;
+Line 32:       userAgent: requestHeaders.get("user-agent"),
+Line 37:       userAgent: null,
+Line 47:     landlord_id: input.landlordId ?? null,
+Line 48:     tenant_id: input.tenantId ?? null,
+Line 60:     user_agent: input.userAgent ?? requestContext.userAgent,
+
+--------------------------------------------------
+FILE: src\server\services\auth.service.ts
+--------------------------------------------------
+Line 131: export async function requireLandlord() {
+Line 132:   return throwDisabledModule("Landlord module");
+Line 135: export async function requireLandlordPlatformOperator() {
+Line 136:   return throwDisabledModule("Landlord module");
+Line 139: export async function requireTenant() {
+Line 140:   return throwDisabledModule("Tenant module");
+Line 143: export async function requireCaretaker() {
+Line 144:   return throwDisabledModule("Caretaker module");
+Line 147: export async function requireAgent() {
+Line 148:   return throwDisabledModule("Agent module");
+Line 151: export async function requireLandlordOrCaretaker() {
+Line 152:   return throwDisabledModule("Landlord/Caretaker module");
+Line 155: export async function requireLandlordOrAgent() {
+Line 156:   return throwDisabledModule("Landlord/Agent module");
+
+--------------------------------------------------
+FILE: src\server\services\developer-payment-receipts.service.ts
+--------------------------------------------------
+Line 115:     bopaProcessingFee: formatNaira(Number(payment.platform_fee_amount)),
+
+--------------------------------------------------
+FILE: src\server\services\gateway-payment.service.ts
+--------------------------------------------------
+Line 23: export async function initializeTenantDashboardRentPayment(
+Line 29: export async function getPublicTenantPaymentCheckout(_params: {
+
+--------------------------------------------------
+FILE: src\server\services\paystack.service.ts
+--------------------------------------------------
+Line 47:   tenant_id: z.string().uuid(),
+Line 48:   landlord_id: z.string().uuid(),
+Line 158: export async function createLandlordSubaccount(params: {
+Line 162:   landlordName: string;
+Line 163:   landlordPhoneNumber: string;
+Line 164:   landlordEmail: string | null;
+Line 170:     description: "Piedras Properties landlord rent collection subaccount",
+Line 171:     primaryContactName: params.landlordName,
+Line 172:     primaryContactPhone: params.landlordPhoneNumber,
+Line 173:     primaryContactEmail: params.landlordEmail,
+Line 177: export async function createAgentSubaccount(params: {
+Line 181:   agentName: string;
+Line 182:   agentPhoneNumber: string | null;
+Line 183:   agentEmail: string | null;
+Line 189:     description: "Piedras Properties agent commission payout subaccount",
+Line 190:     primaryContactName: params.agentName,
+Line 191:     primaryContactPhone: params.agentPhoneNumber,
+Line 192:     primaryContactEmail: params.agentEmail,
+Line 217:   landlordSubaccountCode: string;
+Line 218:   landlordShareKobo: number;
+Line 221:   if (!params.landlordSubaccountCode.trim()) {
+Line 224:       "Landlord payout account is not ready for split payments.",
+Line 229:   if (params.landlordShareKobo <= 0) {
+Line 232:       "Landlord split share must be greater than zero.",
+Line 247:           subaccount: params.landlordSubaccountCode,
+Line 248:           share: params.landlordShareKobo,
+Line 255: export async function createAgentDealTransactionSplit(params: {
+Line 257:   landlordSubaccountCode: string;
+Line 258:   landlordShareKobo: number;
+Line 259:   agentSubaccountCode: string;
+Line 260:   agentShareKobo: number;
+Line 263:   if (!params.landlordSubaccountCode.trim()) {
+Line 265:       "PAYSTACK_LANDLORD_SUBACCOUNT_REQUIRED",
+Line 266:       "Landlord payout account is not ready for split payments.",
+Line 271:   if (!params.agentSubaccountCode.trim()) {
+Line 273:       "PAYSTACK_AGENT_SUBACCOUNT_REQUIRED",
+Line 274:       "Agent payout account is not ready for commission split.",
+Line 279:   if (params.landlordShareKobo <= 0) {
+Line 281:       "PAYSTACK_LANDLORD_SHARE_INVALID",
+Line 282:       "Landlord split share must be greater than zero.",
+Line 287:   if (params.agentShareKobo <= 0) {
+Line 289:       "PAYSTACK_AGENT_SHARE_INVALID",
+Line 290:       "Agent split share must be greater than zero.",
+Line 305:           subaccount: params.landlordSubaccountCode,
+Line 306:           share: params.landlordShareKobo,
+Line 309:           subaccount: params.agentSubaccountCode,
+Line 310:           share: params.agentShareKobo,
+Line 330:       "Landlord payout account is not ready for gateway payments.",
+
+--------------------------------------------------
+FILE: src\server\services\paystack-verification.service.ts
+--------------------------------------------------
+Line 23:   | "landlord"
+Line 24:   | "agent"
+Line 25:   | "tenant";
+Line 39: export type LandlordPaymentGateUiState = PaystackPayoutVerificationUiState;
+Line 243: export function getLandlordPaymentGateUiState(
+Line 245: ): LandlordPaymentGateUiState | null {
+Line 255: export function assertLandlordPayoutVerified<
+Line 271: export function assertAgentPayoutVerified<
+Line 274:   return assertLandlordPayoutVerified(account);
+Line 280:   return assertLandlordPayoutVerified(account);
+
+--------------------------------------------------
+FILE: src\server\services\storage.service.ts
+--------------------------------------------------
+Line 6: const TENANT_KYC_BUCKET = "tenant-kyc-documents";
+Line 7: const TENANCY_AGREEMENT_PDF_BUCKET = "tenancy-agreement-pdfs";
+Line 8: const RENT_RECEIPTS_BUCKET = "rent-receipts";
+Line 66: export async function createTenantKycDocumentLinks(params: {
+Line 67:   tenantIdDocumentPath: string | null;
+Line 68:   tenantPassportPhotoPath: string | null;
+Line 71:   const [tenantIdDocumentUrl, tenantPassportPhotoUrl, guarantorIdDocumentUrl] =
+Line 74:         bucket: TENANT_KYC_BUCKET,
+Line 75:         path: params.tenantIdDocumentPath,
+Line 78:         bucket: TENANT_KYC_BUCKET,
+Line 79:         path: params.tenantPassportPhotoPath,
+Line 82:         bucket: TENANT_KYC_BUCKET,
+Line 88:     tenantIdDocument: {
+Line 89:       label: "Tenant ID document",
+Line 90:       path: params.tenantIdDocumentPath,
+Line 91:       signedUrl: tenantIdDocumentUrl,
+Line 93:     tenantPassportPhoto: {
+Line 94:       label: "Tenant passport photo",
+Line 95:       path: params.tenantPassportPhotoPath,
+Line 96:       signedUrl: tenantPassportPhotoUrl,
+
+--------------------------------------------------
+FILE: src\server\types\auth.types.ts
+--------------------------------------------------
+Line 2:   | "landlord"
+Line 3:   | "tenant"
+Line 4:   | "caretaker"
+Line 5:   | "agent"
+
+--------------------------------------------------
+FILE: src\server\types\payment.types.ts
+--------------------------------------------------
+Line 39:   tenant_id: string;
+Line 40:   landlord_id: string;
+
+--------------------------------------------------
+FILE: src\server\types\paystack.types.ts
+--------------------------------------------------
+Line 87: export type LandlordPaystackAccount = {
+Line 89:   landlord_id: string;
+Line 107: export type AgentPaystackAccount = {
+Line 109:   agent_id: string;
+Line 145:   landlord_id: string;
+Line 146:   tenant_id: string;
+Line 152:   tenuro_fee_amount: number;
+
+--------------------------------------------------
+FILE: src\server\validators\auth.schema.ts
+--------------------------------------------------
+Line 44: export const registerLandlordSchema = phonePasswordRegistrationSchema;
+Line 46: export const registerAgentSchema = phonePasswordRegistrationSchema;
+Line 90: export type RegisterLandlordInput = z.infer<typeof registerLandlordSchema>;
+Line 91: export type RegisterAgentInput = z.infer<typeof registerAgentSchema>;
