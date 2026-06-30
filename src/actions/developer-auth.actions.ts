@@ -9,7 +9,6 @@ import {
   developerLoginSchema,
   developerRegisterSchema,
 } from "@/server/validators/auth.schema";
-import { normalisePhoneNumber } from "@/server/utils/phone";
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -68,6 +67,10 @@ async function deleteAuthUserSafely(userId: string): Promise<void> {
   await admin.auth.admin.deleteUser(userId);
 }
 
+function getPiedrasCompanyName(): string {
+  return process.env.PIEDRAS_COMPANY_NAME?.trim() || "Piedras Properties";
+}
+
 export async function registerDeveloperAction(
   _previousState: DeveloperAuthActionState,
   formData: FormData,
@@ -76,11 +79,6 @@ export async function registerDeveloperAction(
     fullName: readFormText(formData.get("fullName")),
     email: readFormText(formData.get("email")),
     password: readFormText(formData.get("password")),
-    companyName: readFormText(formData.get("companyName")),
-    companyPhone: readFormText(formData.get("companyPhone")),
-    companyEmail: readFormText(formData.get("companyEmail")),
-    rcNumber: readFormText(formData.get("rcNumber")),
-    officeAddress: readFormText(formData.get("officeAddress")),
   });
 
   if (!parsed.success) {
@@ -91,20 +89,7 @@ export async function registerDeveloperAction(
     };
   }
 
-  let normalizedCompanyPhone: { e164: string };
-
-  try {
-    normalizedCompanyPhone = normalisePhoneNumber(parsed.data.companyPhone);
-  } catch {
-    return {
-      status: "error",
-      message: "Enter a valid company phone number.",
-      fieldErrors: {
-        companyPhone: ["Enter a valid company phone number."],
-      },
-    };
-  }
-
+  const companyName = getPiedrasCompanyName();
   const supabase = await createSupabaseCookieClient();
   const admin = createSupabaseAdminClient();
 
@@ -120,7 +105,7 @@ export async function registerDeveloperAction(
       data: {
         role: "developer",
         full_name: parsed.data.fullName,
-        company_name: parsed.data.companyName,
+        company_name: companyName,
       },
     },
   });
@@ -128,7 +113,7 @@ export async function registerDeveloperAction(
   if (error) {
     return {
       status: "error",
-      message: error.message || "Unable to create developer account.",
+      message: error.message || "Unable to create account.",
     };
   }
 
@@ -137,18 +122,16 @@ export async function registerDeveloperAction(
   if (!userId) {
     return {
       status: "error",
-      message: "Unable to create developer account.",
+      message: "Unable to create account.",
     };
   }
-
-  const companyEmail = parsed.data.companyEmail ?? parsed.data.email;
 
   const { error: profileError } = await admin.from("profiles").upsert(
     {
       id: userId,
       role: "developer",
       full_name: parsed.data.fullName,
-      phone_number: normalizedCompanyPhone.e164,
+      phone_number: null,
       email: parsed.data.email,
       country_code: "NG",
       preferred_currency: "NGN",
@@ -165,41 +148,62 @@ export async function registerDeveloperAction(
 
     return {
       status: "error",
-      message: "Unable to save developer profile.",
+      message: "Unable to save profile.",
     };
   }
 
-  const { data: developerAccount, error: accountError } = await admin
+  const { data: existingAccount, error: existingAccountError } = await admin
     .from("developer_accounts")
-    .insert({
-      owner_profile_id: userId,
-      company_name: parsed.data.companyName,
-      company_phone: normalizedCompanyPhone.e164,
-      company_email: companyEmail,
-      rc_number: parsed.data.rcNumber,
-      office_address: parsed.data.officeAddress,
-      status: "active",
-      subscription_plan: "starter",
-    })
     .select("id")
-    .single();
+    .limit(1)
+    .maybeSingle();
 
-  if (accountError || !developerAccount) {
+  if (existingAccountError) {
     await deleteAuthUserSafely(userId);
 
     return {
       status: "error",
-      message: "Unable to create company workspace.",
+      message: "Unable to check Piedras workspace.",
     };
+  }
+
+  let developerAccountId = existingAccount?.id as string | undefined;
+
+  if (!developerAccountId) {
+    const { data: developerAccount, error: accountError } = await admin
+      .from("developer_accounts")
+      .insert({
+        owner_profile_id: userId,
+        company_name: companyName,
+        company_phone: null,
+        company_email: parsed.data.email,
+        rc_number: null,
+        office_address: null,
+        status: "active",
+        subscription_plan: "starter",
+      })
+      .select("id")
+      .single();
+
+    if (accountError || !developerAccount) {
+      await deleteAuthUserSafely(userId);
+
+      return {
+        status: "error",
+        message: "Unable to create Piedras workspace.",
+      };
+    }
+
+    developerAccountId = developerAccount.id;
   }
 
   const { error: developerProfileError } = await admin
     .from("developer_profiles")
     .insert({
-      developer_account_id: developerAccount.id,
+      developer_account_id: developerAccountId,
       profile_id: userId,
       full_name: parsed.data.fullName,
-      phone_number: normalizedCompanyPhone.e164,
+      phone_number: null,
       email: parsed.data.email,
       role: "developer_owner",
       is_active: true,
@@ -211,7 +215,7 @@ export async function registerDeveloperAction(
 
     return {
       status: "error",
-      message: "Unable to create developer access profile.",
+      message: "Unable to create account access.",
     };
   }
 
@@ -261,7 +265,7 @@ export async function loginDeveloperAction(
 
     return {
       status: "error",
-      message: "This developer account is not active.",
+      message: "This account is not active.",
     };
   }
 
