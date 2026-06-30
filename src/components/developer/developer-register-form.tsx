@@ -2,10 +2,8 @@
 
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import {
-  initialDeveloperAuthActionState,
-  registerDeveloperAction,
-} from "@/actions/developer-auth.actions";
+import { registerDeveloperAction } from "@/actions/developer-auth.actions";
+import { initialDeveloperAuthActionState } from "@/actions/developer-auth.state";
 import { PhoneNumberInput } from "@/components/auth/phone-number-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

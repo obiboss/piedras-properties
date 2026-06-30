@@ -4,22 +4,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import type { DeveloperAuthActionState } from "@/actions/developer-auth.state";
 import {
   developerLoginSchema,
   developerRegisterSchema,
 } from "@/server/validators/auth.schema";
 import { normalisePhoneNumber } from "@/server/utils/phone";
-
-export type DeveloperAuthActionState = {
-  status: "idle" | "error" | "success";
-  message: string;
-  fieldErrors?: Record<string, string[] | undefined>;
-};
-
-export const initialDeveloperAuthActionState: DeveloperAuthActionState = {
-  status: "idle",
-  message: "",
-};
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -73,23 +63,8 @@ function readFormText(value: FormDataEntryValue | null): string {
   return value.trim();
 }
 
-// function nullableText(value: string | null | undefined): string | null {
-//   if (!value) {
-//     return null;
-//   }
-
-//   const trimmed = value.trim();
-
-//   if (!trimmed) {
-//     return null;
-//   }
-
-//   return trimmed;
-// }
-
 async function deleteAuthUserSafely(userId: string): Promise<void> {
   const admin = createSupabaseAdminClient();
-
   await admin.auth.admin.deleteUser(userId);
 }
 
@@ -291,4 +266,12 @@ export async function loginDeveloperAction(
   }
 
   redirect("/developer");
+}
+
+export async function developerSignOutAction(): Promise<void> {
+  const supabase = await createSupabaseCookieClient();
+
+  await supabase.auth.signOut();
+
+  redirect("/developer/login");
 }
