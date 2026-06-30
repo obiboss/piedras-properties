@@ -40,6 +40,11 @@ export function DeveloperLoginForm() {
           </div>
         ) : null}
 
+        <h1 className="text-center text-2xl font-semibold text-slate-950">
+          {" "}
+          Sign in to your account obi
+        </h1>
+
         <Input
           label="Email address"
           name="email"
