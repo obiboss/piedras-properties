@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError } from "@/server/errors/app-error";
 import { assertDeveloperPayoutAccountVerified } from "@/server/services/developer-payout.service";
+import { generateInvestmentPaymentReceiptSystem } from "@/server/services/investment-payment-receipts.service";
 import {
   assertPaystackAmountMatchesExpected,
   convertKoboToNaira,
@@ -55,6 +56,9 @@ export type PublicInvestmentPaymentLink = {
   investor_id: string | null;
   investment_id: string | null;
   receipt_id: string | null;
+  receipt_number: string | null;
+  receipt_path: string | null;
+  receipt_generated: boolean;
 };
 
 export type PublicInvestmentPageData = {
@@ -75,6 +79,11 @@ type InvestorRow = {
   email: string | null;
 };
 
+type ExistingInvestmentRow = {
+  id: string;
+  maturity_date: string;
+};
+
 type PaymentLinkLookupRow = PublicInvestmentPaymentLink;
 
 type PaystackVerifiedTransaction = {
@@ -90,6 +99,7 @@ type FinalizedInvestmentPayment = {
   investmentId: string;
   amountPaid: number;
   maturityDate: string;
+  receiptDownloadUrl: string | null;
 };
 
 function createInvestmentReference() {
@@ -216,7 +226,8 @@ function calculatePayoutRows(params: {
   const regularReturnAmount = Number(
     (params.returnAmount / payoutCount).toFixed(2),
   );
-  const rows = dueMonths.map((month, index) => {
+
+  return dueMonths.map((month, index) => {
     const isFinal = index === dueMonths.length - 1;
     const previousReturnTotal = regularReturnAmount * index;
     const returnPortion = isFinal
@@ -238,8 +249,6 @@ function calculatePayoutRows(params: {
       payout_type: isFinal ? "capital_plus_return" : "return",
     };
   });
-
-  return rows;
 }
 
 async function getDeveloperAccount(params: {
@@ -309,36 +318,39 @@ async function getInvestmentPlan(params: {
   return data;
 }
 
+const INVESTMENT_PAYMENT_LINK_SELECT = `
+  id,
+  developer_account_id,
+  investment_plan_id,
+  shared_by_profile_id,
+  token,
+  investor_full_name,
+  investor_phone_number,
+  investor_email,
+  amount_requested,
+  amount_paid,
+  paystack_reference,
+  paystack_authorization_url,
+  status,
+  expires_at,
+  submitted_at,
+  payment_started_at,
+  paid_at,
+  investor_id,
+  investment_id,
+  receipt_id,
+  receipt_number,
+  receipt_path,
+  receipt_generated
+`;
+
 async function getPaymentLinkByToken(params: {
   supabase: SupabaseClient;
   token: string;
 }) {
   const { data, error } = await params.supabase
     .from("developer_investment_payment_links")
-    .select(
-      `
-        id,
-        developer_account_id,
-        investment_plan_id,
-        shared_by_profile_id,
-        token,
-        investor_full_name,
-        investor_phone_number,
-        investor_email,
-        amount_requested,
-        amount_paid,
-        paystack_reference,
-        paystack_authorization_url,
-        status,
-        expires_at,
-        submitted_at,
-        payment_started_at,
-        paid_at,
-        investor_id,
-        investment_id,
-        receipt_id
-      `,
-    )
+    .select(INVESTMENT_PAYMENT_LINK_SELECT)
     .eq("token", params.token)
     .maybeSingle<PaymentLinkLookupRow>();
 
@@ -363,30 +375,7 @@ async function getPaymentLinkByReference(params: {
 }) {
   const { data, error } = await params.supabase
     .from("developer_investment_payment_links")
-    .select(
-      `
-        id,
-        developer_account_id,
-        investment_plan_id,
-        shared_by_profile_id,
-        token,
-        investor_full_name,
-        investor_phone_number,
-        investor_email,
-        amount_requested,
-        amount_paid,
-        paystack_reference,
-        paystack_authorization_url,
-        status,
-        expires_at,
-        submitted_at,
-        payment_started_at,
-        paid_at,
-        investor_id,
-        investment_id,
-        receipt_id
-      `,
-    )
+    .select(INVESTMENT_PAYMENT_LINK_SELECT)
     .eq("paystack_reference", params.reference)
     .maybeSingle<PaymentLinkLookupRow>();
 
@@ -472,6 +461,18 @@ function assertAmountAllowed(params: {
       `Maximum investment amount is ${maximumAmount.toLocaleString("en-NG")}.`,
       400,
     );
+  }
+}
+
+async function generateReceiptSafely(paymentLinkId: string) {
+  try {
+    const receipt = await generateInvestmentPaymentReceiptSystem(paymentLinkId);
+
+    return receipt.receiptDownloadUrl;
+  } catch (error) {
+    console.error("Failed to generate investment receipt:", error);
+
+    return null;
   }
 }
 
@@ -632,6 +633,23 @@ async function findOrCreateInvestor(params: {
   return data;
 }
 
+async function getExistingInvestmentByPaymentLink(params: {
+  supabase: SupabaseClient;
+  paymentLinkId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("developer_investor_investments")
+    .select("id, maturity_date")
+    .eq("payment_link_id", params.paymentLinkId)
+    .maybeSingle<ExistingInvestmentRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 async function createInvestmentAndPayouts(params: {
   supabase: SupabaseClient;
   link: PublicInvestmentPaymentLink;
@@ -640,6 +658,18 @@ async function createInvestmentAndPayouts(params: {
   principalAmount: number;
   paidAtIso: string;
 }) {
+  const existingInvestment = await getExistingInvestmentByPaymentLink({
+    supabase: params.supabase,
+    paymentLinkId: params.link.id,
+  });
+
+  if (existingInvestment) {
+    return {
+      investmentId: existingInvestment.id,
+      maturityDate: existingInvestment.maturity_date,
+    };
+  }
+
   const startDate = params.paidAtIso.slice(0, 10);
   const maturityDate = addMonths(startDate, params.plan.duration_months);
   const returnAmount = calculateReturnAmount({
@@ -672,10 +702,26 @@ async function createInvestmentAndPayouts(params: {
       status: "active",
       created_by_profile_id: params.link.shared_by_profile_id,
     })
-    .select("id")
-    .single<{ id: string }>();
+    .select("id, maturity_date")
+    .single<ExistingInvestmentRow>();
 
   if (investmentError) {
+    const possibleDuplicateError = investmentError as { code?: string };
+
+    if (possibleDuplicateError.code === "23505") {
+      const duplicatedInvestment = await getExistingInvestmentByPaymentLink({
+        supabase: params.supabase,
+        paymentLinkId: params.link.id,
+      });
+
+      if (duplicatedInvestment) {
+        return {
+          investmentId: duplicatedInvestment.id,
+          maturityDate: duplicatedInvestment.maturity_date,
+        };
+      }
+    }
+
     throw investmentError;
   }
 
@@ -719,11 +765,14 @@ export async function verifyAndFinalizeInvestmentPayment(params: {
   const link = await getPaymentLinkByReference(params);
 
   if (link.status === "paid" && link.investor_id && link.investment_id) {
+    const receiptDownloadUrl = await generateReceiptSafely(link.id);
+
     return {
       investorId: link.investor_id,
       investmentId: link.investment_id,
       amountPaid: Number(link.amount_paid ?? link.amount_requested ?? 0),
       maturityDate: getTodayIso(),
+      receiptDownloadUrl,
     };
   }
 
@@ -798,10 +847,13 @@ export async function verifyAndFinalizeInvestmentPayment(params: {
     throw updateLinkError;
   }
 
+  const receiptDownloadUrl = await generateReceiptSafely(link.id);
+
   return {
     investorId: investor.id,
     investmentId: created.investmentId,
     amountPaid,
     maturityDate: created.maturityDate,
+    receiptDownloadUrl,
   };
 }

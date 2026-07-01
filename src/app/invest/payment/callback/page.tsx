@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, Download, XCircle } from "lucide-react";
 import { verifyAndFinalizeInvestmentPayment } from "@/server/services/investment-payment-link.service";
 import { createSupabaseAdminClient } from "@/server/supabase/admin";
 
@@ -16,11 +16,13 @@ type CallbackState =
       status: "success";
       title: string;
       message: string;
+      receiptDownloadUrl: string | null;
     }
   | {
       status: "error";
       title: string;
       message: string;
+      receiptDownloadUrl: null;
     };
 
 function getSearchParamValue(value: string | string[] | undefined) {
@@ -55,6 +57,7 @@ async function resolveCallbackState(
       title: "Payment reference missing",
       message:
         "Your payment may have gone through, but the payment reference was not found on this page. Contact Piedras Properties with your payment alert.",
+      receiptDownloadUrl: null,
     };
   }
 
@@ -73,7 +76,8 @@ async function resolveCallbackState(
         maximumFractionDigits: 0,
       }).format(
         result.amountPaid,
-      )} has been confirmed. Your investor record and payout schedule have been created.`,
+      )} has been confirmed. Your investor record, payout schedule, and receipt have been created.`,
+      receiptDownloadUrl: result.receiptDownloadUrl,
     };
   } catch (error) {
     console.error("Investment payment callback failed", error);
@@ -83,6 +87,7 @@ async function resolveCallbackState(
       title: "Payment could not be confirmed",
       message:
         "We could not confirm this investment payment yet. If your account was debited, contact Piedras Properties with your payment reference.",
+      receiptDownloadUrl: null,
     };
   }
 }
@@ -125,12 +130,26 @@ export default async function InvestmentPaymentCallbackPage({
           {pageState.message}
         </p>
 
-        <Link
-          href="/"
-          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-button bg-primary px-5 text-sm font-extrabold text-white transition hover:bg-primary-hover"
-        >
-          Done
-        </Link>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          {pageState.receiptDownloadUrl ? (
+            <a
+              href={pageState.receiptDownloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-button bg-primary px-5 text-sm font-extrabold text-white transition hover:bg-primary-hover"
+            >
+              <Download aria-hidden="true" size={18} strokeWidth={2.6} />
+              Download receipt
+            </a>
+          ) : null}
+
+          <Link
+            href="/"
+            className="inline-flex min-h-11 items-center justify-center rounded-button border border-border-soft bg-white px-5 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+          >
+            Done
+          </Link>
+        </div>
       </section>
     </main>
   );
