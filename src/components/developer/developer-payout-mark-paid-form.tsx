@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { MessageCircle } from "lucide-react";
 import { markInvestorPayoutPaidAction } from "@/actions/developer-investor-payouts.actions";
 import { initialDeveloperInvestorPayoutActionState } from "@/actions/developer-investor-payouts.state";
 
@@ -78,6 +79,18 @@ export function DeveloperPayoutMarkPaidForm({
         >
           {state.message}
         </div>
+      ) : null}
+
+      {state.whatsappHref ? (
+        <a
+          href={state.whatsappHref}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-button bg-success px-4 text-sm font-extrabold text-white transition hover:opacity-90"
+        >
+          <MessageCircle aria-hidden="true" size={17} strokeWidth={2.7} />
+          Send WhatsApp confirmation
+        </a>
       ) : null}
 
       <label className="block space-y-1">

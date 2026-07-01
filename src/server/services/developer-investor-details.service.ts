@@ -64,6 +64,16 @@ export type DeveloperInvestorPayoutDetail = {
   payoutType: "return" | "capital_plus_return";
 };
 
+export type MarkInvestorPayoutPaidResult = {
+  payoutId: string;
+  investorId: string;
+  investorName: string;
+  investorPhoneNumber: string | null;
+  amountPaid: number;
+  paymentDate: string;
+  paymentReference: string;
+};
+
 type InvestorRow = {
   id: string;
   developer_account_id: string;
@@ -100,6 +110,16 @@ type PayoutRow = {
   payment_reference: string | null;
   notes: string | null;
   payout_type: "return" | "capital_plus_return";
+};
+
+type PayoutForPaymentRow = {
+  id: string;
+  developer_account_id: string;
+  investor_id: string;
+  payout_label: string;
+  amount_due: number | string;
+  amount_paid: number | string;
+  status: "pending" | "part_paid" | "paid" | "cancelled";
 };
 
 type PlanRow = {
@@ -439,12 +459,13 @@ export async function getDeveloperInvestorDetail(params: {
 export async function markDeveloperInvestorPayoutPaid(params: {
   supabase: SupabaseClient;
   developerAccountId: string;
+  profileId: string;
   payoutId: string;
   paymentDate: string;
   paymentChannel: string;
   paymentReference: string;
   note: string | null;
-}) {
+}): Promise<MarkInvestorPayoutPaidResult> {
   const paymentDate = validatePaymentDate(params.paymentDate);
   const paymentChannel = validatePaymentChannel(params.paymentChannel);
   const paymentReference = params.paymentReference.trim();
@@ -463,6 +484,8 @@ export async function markDeveloperInvestorPayoutPaid(params: {
       `
         id,
         developer_account_id,
+        investor_id,
+        payout_label,
         amount_due,
         amount_paid,
         status
@@ -470,13 +493,7 @@ export async function markDeveloperInvestorPayoutPaid(params: {
     )
     .eq("developer_account_id", params.developerAccountId)
     .eq("id", params.payoutId)
-    .maybeSingle<{
-      id: string;
-      developer_account_id: string;
-      amount_due: number | string;
-      amount_paid: number | string;
-      status: "pending" | "part_paid" | "paid" | "cancelled";
-    }>();
+    .maybeSingle<PayoutForPaymentRow>();
 
   if (payoutError) {
     throw payoutError;
@@ -516,12 +533,20 @@ export async function markDeveloperInvestorPayoutPaid(params: {
     );
   }
 
-  const { data, error } = await params.supabase
+  const investor = await getInvestor({
+    supabase: params.supabase,
+    developerAccountId: params.developerAccountId,
+    investorId: payout.investor_id,
+  });
+
+  const paidAt = `${paymentDate}T12:00:00.000Z`;
+
+  const { error: updateError } = await params.supabase
     .from("developer_investor_payouts")
     .update({
       amount_paid: amountDue,
       status: "paid",
-      paid_at: `${paymentDate}T12:00:00.000Z`,
+      paid_at: paidAt,
       payment_channel: paymentChannel,
       payment_reference: paymentReference,
       notes: params.note,
@@ -529,13 +554,40 @@ export async function markDeveloperInvestorPayoutPaid(params: {
     })
     .eq("developer_account_id", params.developerAccountId)
     .eq("id", params.payoutId)
-    .neq("status", "paid")
-    .select("id")
-    .single<{ id: string }>();
+    .neq("status", "paid");
 
-  if (error) {
-    throw error;
+  if (updateError) {
+    throw updateError;
   }
 
-  return data;
+  const { error: eventError } = await params.supabase
+    .from("developer_investor_payout_events")
+    .insert({
+      developer_account_id: params.developerAccountId,
+      investor_id: payout.investor_id,
+      payout_id: payout.id,
+      event_type: "marked_paid",
+      event_title: "Payout marked as paid",
+      event_note: params.note,
+      amount_due: amountDue,
+      amount_paid: amountDue,
+      payment_channel: paymentChannel,
+      payment_reference: paymentReference,
+      event_date: paymentDate,
+      created_by_profile_id: params.profileId,
+    });
+
+  if (eventError) {
+    throw eventError;
+  }
+
+  return {
+    payoutId: payout.id,
+    investorId: investor.id,
+    investorName: investor.full_name,
+    investorPhoneNumber: investor.phone_number,
+    amountPaid: amountDue,
+    paymentDate,
+    paymentReference,
+  };
 }

@@ -23,6 +23,40 @@ function getNullableText(formData: FormData, key: string) {
   return value.length > 0 ? value : null;
 }
 
+function formatNaira(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function buildWhatsAppHref(params: {
+  phoneNumber: string | null;
+  investorName: string;
+  amountPaid: number;
+  paymentDate: string;
+  paymentReference: string;
+}) {
+  if (!params.phoneNumber) {
+    return undefined;
+  }
+
+  const digits = params.phoneNumber.replace(/\D/g, "");
+
+  if (digits.length < 7) {
+    return undefined;
+  }
+
+  const message = `Hello ${params.investorName}, Piedras Properties confirms that your investor payout of ${formatNaira(
+    params.amountPaid,
+  )} was paid on ${params.paymentDate}. Reference: ${
+    params.paymentReference
+  }. Thank you.`;
+
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
 export async function markInvestorPayoutPaidAction(
   _previousState: DeveloperInvestorPayoutActionState,
   formData: FormData,
@@ -56,9 +90,10 @@ export async function markInvestorPayoutPaidAction(
       };
     }
 
-    await markDeveloperInvestorPayoutPaid({
+    const result = await markDeveloperInvestorPayoutPaid({
       supabase,
       developerAccountId: account.id,
+      profileId: developer.id,
       payoutId,
       paymentDate,
       paymentChannel,
@@ -73,6 +108,13 @@ export async function markInvestorPayoutPaidAction(
     return {
       status: "success",
       message: "Investor payout marked as paid.",
+      whatsappHref: buildWhatsAppHref({
+        phoneNumber: result.investorPhoneNumber,
+        investorName: result.investorName,
+        amountPaid: result.amountPaid,
+        paymentDate: result.paymentDate,
+        paymentReference: result.paymentReference,
+      }),
     };
   } catch (error) {
     console.error("markInvestorPayoutPaidAction failed", error);
