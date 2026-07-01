@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { CreditCard, X } from "lucide-react";
 
 type DeveloperBankSetupToastProps = {
   state: "missing" | "unverified" | "failed" | "verified";
 };
+
+const AUTO_HIDE_MS = 7500;
+const EXIT_ANIMATION_MS = 260;
 
 function getToastCopy(state: DeveloperBankSetupToastProps["state"]) {
   if (state === "failed") {
@@ -35,16 +39,58 @@ function getToastCopy(state: DeveloperBankSetupToastProps["state"]) {
 export function DeveloperBankSetupToast({
   state,
 }: DeveloperBankSetupToastProps) {
-  const [dismissed, setDismissed] = useState(false);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeKey = `${pathname}?${searchParams.toString()}`;
 
-  if (state === "verified" || dismissed) {
+  const [visible, setVisible] = useState(false);
+  const [hiddenRouteKey, setHiddenRouteKey] = useState<string | null>(null);
+
+  const shouldRender = state !== "verified" && hiddenRouteKey !== routeKey;
+
+  useEffect(() => {
+    if (!shouldRender) {
+      return;
+    }
+
+    const enterFrame = window.requestAnimationFrame(() => {
+      setVisible(true);
+    });
+
+    const hideTimer = window.setTimeout(() => {
+      setVisible(false);
+
+      window.setTimeout(() => {
+        setHiddenRouteKey(routeKey);
+      }, EXIT_ANIMATION_MS);
+    }, AUTO_HIDE_MS);
+
+    return () => {
+      window.cancelAnimationFrame(enterFrame);
+      window.clearTimeout(hideTimer);
+    };
+  }, [routeKey, shouldRender]);
+
+  function dismissToast() {
+    setVisible(false);
+
+    window.setTimeout(() => {
+      setHiddenRouteKey(routeKey);
+    }, EXIT_ANIMATION_MS);
+  }
+
+  if (!shouldRender) {
     return null;
   }
 
   const copy = getToastCopy(state);
 
   return (
-    <div className="fixed right-4 top-24 z-50 w-[calc(100%-2rem)] max-w-sm rounded-card border border-border-soft bg-white p-4 shadow-2xl md:right-6">
+    <div
+      className={`fixed right-4 top-24 z-50 w-[calc(100%-2rem)] max-w-sm rounded-card border border-border-soft bg-white p-4 shadow-2xl transition-all duration-300 ease-out md:right-6 ${
+        visible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"
+      }`}
+    >
       <div className="flex items-start gap-3">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
           <CreditCard aria-hidden="true" size={20} strokeWidth={2.6} />
@@ -67,7 +113,7 @@ export function DeveloperBankSetupToast({
         <button
           type="button"
           aria-label="Dismiss bank setup reminder"
-          onClick={() => setDismissed(true)}
+          onClick={dismissToast}
           className="rounded-full p-1 text-text-muted transition hover:bg-surface hover:text-text-strong"
         >
           <X aria-hidden="true" size={16} strokeWidth={2.6} />

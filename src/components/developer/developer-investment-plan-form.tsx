@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { createInvestmentPlanAction } from "@/actions/developer-investment-plans.actions";
 import { initialDeveloperInvestmentPlanActionState } from "@/actions/developer-investment-plans.state";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 
 function SubmitButton() {
@@ -16,7 +17,7 @@ function SubmitButton() {
       className="min-h-11 rounded-button"
       disabled={pending}
     >
-      {pending ? "Creating plan..." : "Create investment plan"}
+      {pending ? "Creating offer..." : "Create investment offer"}
     </Button>
   );
 }
@@ -44,28 +45,22 @@ export function DeveloperInvestmentPlanForm() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Input
-          label="Plan name"
+          label="Offer name"
           name="planName"
           placeholder="40% Return in 12 Months"
           required
         />
 
-        <Input
+        <CurrencyInput
           label="Minimum investment amount"
           name="minimumAmount"
-          type="number"
-          min="1"
-          step="0.01"
-          placeholder="1000000"
+          placeholder="1,000,000.00"
           required
         />
 
-        <Input
+        <CurrencyInput
           label="Maximum investment amount"
           name="maximumAmount"
-          type="number"
-          min="1"
-          step="0.01"
           placeholder="Optional"
         />
 
@@ -105,19 +100,16 @@ export function DeveloperInvestmentPlanForm() {
           placeholder="40"
         />
 
-        <Input
+        <CurrencyInput
           label="Fixed return amount"
           name="fixedReturnAmount"
-          type="number"
-          min="0"
-          step="0.01"
           placeholder="Only for fixed return"
         />
       </div>
 
       <label className="block space-y-2">
         <span className="text-sm font-black text-text-strong">
-          Payout frequency
+          Payout structure
         </span>
         <select
           name="payoutFrequency"
@@ -125,13 +117,15 @@ export function DeveloperInvestmentPlanForm() {
           defaultValue="maturity"
           className="min-h-12 w-full rounded-button border border-border-soft bg-white px-4 text-sm font-bold text-text-strong outline-none transition focus:border-primary focus:ring-4 focus:ring-primary-soft"
         >
-          <option value="maturity">One-time at maturity</option>
-          <option value="monthly">Monthly return, capital at maturity</option>
+          <option value="maturity">Pay capital plus return at maturity</option>
+          <option value="monthly">
+            Pay return monthly, capital at maturity
+          </option>
           <option value="quarterly">
-            Quarterly return, capital at maturity
+            Pay return quarterly, capital at maturity
           </option>
           <option value="biannual">
-            Bi-annual return, capital at maturity
+            Pay return twice yearly, capital at maturity
           </option>
         </select>
       </label>
