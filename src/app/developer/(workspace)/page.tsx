@@ -1,16 +1,19 @@
 import Link from "next/link";
 import {
+  AlertTriangle,
+  ArrowRight,
   Building2,
+  CalendarClock,
   CheckCircle2,
   CreditCard,
-  Map,
+  FileText,
+  Link2,
   ShoppingBag,
-  Users,
 } from "lucide-react";
+import { DeveloperBankSetupToast } from "@/components/developer/developer-bank-setup-toast";
 import { DeveloperDocumentTemplateForm } from "@/components/developer/developer-document-template-form";
 import { DeveloperPayoutSetupForm } from "@/components/developer/developer-payout-setup-form";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { DEVELOPER_TEMPLATE_PLACEHOLDERS } from "@/constants/developer-document-templates";
@@ -32,12 +35,81 @@ type DeveloperDashboardPageProps = {
 type PayoutDashboardState = "missing" | "unverified" | "verified" | "failed";
 
 type DashboardMetric = {
-  estates: number;
-  plots: number;
+  estateCount: number;
+  totalPlots: number;
   availablePlots: number;
-  reservedPlots: number;
   activeSales: number;
-  buyers: number;
+  investorCount: number;
+  salesReceivedThisMonth: number;
+  paymentsReceivedToday: number;
+};
+
+type CountQueryResult = {
+  count: number | null;
+  error: unknown;
+};
+
+type SalePaymentAmountRow = {
+  amount_paid: number | string | null;
+};
+
+type ScheduleItemRow = {
+  id: string;
+  sale_id: string;
+  label: string;
+  due_date: string;
+  expected_amount: number | string;
+  amount_paid: number | string;
+  status: string;
+};
+
+type SaleLookupRow = {
+  id: string;
+  buyer_id: string;
+  estate_id: string;
+  plot_id: string;
+};
+
+type BuyerLookupRow = {
+  id: string;
+  full_name: string;
+};
+
+type EstateLookupRow = {
+  id: string;
+  estate_name: string;
+};
+
+type PlotLookupRow = {
+  id: string;
+  plot_number: string;
+};
+
+type RecentPaymentRow = {
+  id: string;
+  sale_id: string;
+  amount_paid: number | string;
+  payment_date: string;
+  created_at: string;
+};
+
+type InvestorReturnRow = {
+  id: string;
+  investorName: string;
+  estateName: string;
+  plotNumber: string;
+  returnPlan: string;
+  dueDate: string;
+  amountDue: number;
+  statusLabel: "Overdue" | "Due today" | "Due soon" | "Upcoming";
+};
+
+type RecentActivityRow = {
+  id: string;
+  title: string;
+  description: string;
+  amount: number;
+  createdAt: string;
 };
 
 function getSingleSearchParam(
@@ -71,6 +143,103 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
+function formatActivityTime(value: string) {
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatNaira(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function getLagosDateIso(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToIso(dateIso: string, days: number) {
+  const date = new Date(`${dateIso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function getMonthStartIso(todayIso: string) {
+  return `${todayIso.slice(0, 7)}-01`;
+}
+
+function getDateDiffInDays(fromIso: string, toIso: string) {
+  const from = new Date(`${fromIso}T00:00:00.000Z`).getTime();
+  const to = new Date(`${toIso}T00:00:00.000Z`).getTime();
+
+  return Math.round((to - from) / 86_400_000);
+}
+
+function getDueDateText(dueDate: string, todayIso: string) {
+  const diff = getDateDiffInDays(todayIso, dueDate);
+
+  if (diff < 0) {
+    return `Overdue since ${formatDate(dueDate)}`;
+  }
+
+  if (diff === 0) {
+    return `${formatDate(dueDate)} · today`;
+  }
+
+  if (diff === 1) {
+    return `${formatDate(dueDate)} · tomorrow`;
+  }
+
+  return `${formatDate(dueDate)} · in ${diff} days`;
+}
+
+function getInvestorReturnStatus(
+  dueDate: string,
+  todayIso: string,
+): InvestorReturnRow["statusLabel"] {
+  const diff = getDateDiffInDays(todayIso, dueDate);
+
+  if (diff < 0) {
+    return "Overdue";
+  }
+
+  if (diff === 0) {
+    return "Due today";
+  }
+
+  if (diff <= 7) {
+    return "Due soon";
+  }
+
+  return "Upcoming";
+}
+
 function getPayoutCopy(state: PayoutDashboardState) {
   if (state === "verified") {
     return {
@@ -79,7 +248,6 @@ function getPayoutCopy(state: PayoutDashboardState) {
       title: "Payment account ready",
       description:
         "Buyer payment links are available. Sale payments can be routed to your approved bank account.",
-      actionLabel: "View bank account",
       iconTone: "bg-success-soft text-success",
     };
   }
@@ -90,8 +258,7 @@ function getPayoutCopy(state: PayoutDashboardState) {
       badgeTone: "warning" as const,
       title: "Bank account under review",
       description:
-        "You can keep managing estates and buyers. Buyer payment links unlock after approval.",
-      actionLabel: "Check bank setup",
+        "You can keep managing estates and sales. Payment links unlock after approval.",
       iconTone: "bg-warning-soft text-warning",
     };
   }
@@ -101,9 +268,7 @@ function getPayoutCopy(state: PayoutDashboardState) {
       badge: "Needs correction",
       badgeTone: "danger" as const,
       title: "Bank account needs correction",
-      description:
-        "Update your bank details before sending buyer payment links.",
-      actionLabel: "Update bank account",
+      description: "Update your bank details before sending payment links.",
       iconTone: "bg-danger-soft text-danger",
     };
   }
@@ -114,17 +279,11 @@ function getPayoutCopy(state: PayoutDashboardState) {
     title: "Add bank account",
     description:
       "Add the bank account where buyer payments should be settled before sending payment links.",
-    actionLabel: "Add bank account",
     iconTone: "bg-primary-soft text-primary",
   };
 }
 
-async function getExactCount(
-  query: PromiseLike<{
-    count: number | null;
-    error: unknown;
-  }>,
-) {
+async function getExactCount(query: PromiseLike<CountQueryResult>) {
   const result = await query;
 
   if (result.error) {
@@ -134,62 +293,277 @@ async function getExactCount(
   return result.count ?? 0;
 }
 
+function unique(values: string[]) {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
+}
+
+function toLookupMap<TRow extends { id: string }>(rows: TRow[]) {
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
 async function getDashboardMetrics(params: {
   developerAccountId: string;
 }): Promise<DashboardMetric> {
   const supabase = createSupabaseAdminClient();
+  const todayIso = getLagosDateIso();
+  const monthStartIso = getMonthStartIso(todayIso);
 
-  const [estates, plots, availablePlots, reservedPlots, activeSales, buyers] =
-    await Promise.all([
-      getExactCount(
-        supabase
-          .from("developer_estates")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId),
-      ),
-      getExactCount(
-        supabase
-          .from("developer_plots")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId),
-      ),
-      getExactCount(
-        supabase
-          .from("developer_plots")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId)
-          .eq("status", "available"),
-      ),
-      getExactCount(
-        supabase
-          .from("developer_plots")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId)
-          .eq("status", "reserved"),
-      ),
-      getExactCount(
-        supabase
-          .from("developer_sales")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId)
-          .eq("status", "active"),
-      ),
-      getExactCount(
-        supabase
-          .from("developer_buyers")
-          .select("id", { count: "exact", head: true })
-          .eq("developer_account_id", params.developerAccountId),
-      ),
-    ]);
+  const [
+    estateCount,
+    totalPlots,
+    availablePlots,
+    activeSales,
+    investorCount,
+    paymentsToday,
+    paymentsThisMonthResult,
+  ] = await Promise.all([
+    getExactCount(
+      supabase
+        .from("developer_estates")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId),
+    ),
+    getExactCount(
+      supabase
+        .from("developer_plots")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId),
+    ),
+    getExactCount(
+      supabase
+        .from("developer_plots")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId)
+        .eq("status", "available"),
+    ),
+    getExactCount(
+      supabase
+        .from("developer_sales")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId)
+        .eq("status", "active"),
+    ),
+    getExactCount(
+      supabase
+        .from("developer_buyers")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId),
+    ),
+    getExactCount(
+      supabase
+        .from("developer_sale_payments")
+        .select("id", { count: "exact", head: true })
+        .eq("developer_account_id", params.developerAccountId)
+        .eq("status", "posted")
+        .eq("payment_date", todayIso),
+    ),
+    supabase
+      .from("developer_sale_payments")
+      .select("amount_paid")
+      .eq("developer_account_id", params.developerAccountId)
+      .eq("status", "posted")
+      .gte("payment_date", monthStartIso)
+      .returns<SalePaymentAmountRow[]>(),
+  ]);
+
+  if (paymentsThisMonthResult.error) {
+    throw paymentsThisMonthResult.error;
+  }
+
+  const salesReceivedThisMonth = (paymentsThisMonthResult.data ?? []).reduce(
+    (total, row) => total + Number(row.amount_paid ?? 0),
+    0,
+  );
 
   return {
-    estates,
-    plots,
+    estateCount,
+    totalPlots,
     availablePlots,
-    reservedPlots,
     activeSales,
-    buyers,
+    investorCount,
+    salesReceivedThisMonth,
+    paymentsReceivedToday: paymentsToday,
   };
+}
+
+async function getLookupRows(params: {
+  developerAccountId: string;
+  saleIds: string[];
+}) {
+  const supabase = createSupabaseAdminClient();
+
+  if (params.saleIds.length === 0) {
+    return {
+      salesById: new Map<string, SaleLookupRow>(),
+      buyersById: new Map<string, BuyerLookupRow>(),
+      estatesById: new Map<string, EstateLookupRow>(),
+      plotsById: new Map<string, PlotLookupRow>(),
+    };
+  }
+
+  const salesResult = await supabase
+    .from("developer_sales")
+    .select("id, buyer_id, estate_id, plot_id")
+    .eq("developer_account_id", params.developerAccountId)
+    .in("id", params.saleIds)
+    .returns<SaleLookupRow[]>();
+
+  if (salesResult.error) {
+    throw salesResult.error;
+  }
+
+  const sales = salesResult.data ?? [];
+  const buyerIds = unique(sales.map((sale) => sale.buyer_id));
+  const estateIds = unique(sales.map((sale) => sale.estate_id));
+  const plotIds = unique(sales.map((sale) => sale.plot_id));
+
+  const [buyersResult, estatesResult, plotsResult] = await Promise.all([
+    buyerIds.length > 0
+      ? supabase
+          .from("developer_buyers")
+          .select("id, full_name")
+          .eq("developer_account_id", params.developerAccountId)
+          .in("id", buyerIds)
+          .returns<BuyerLookupRow[]>()
+      : Promise.resolve({ data: [], error: null }),
+    estateIds.length > 0
+      ? supabase
+          .from("developer_estates")
+          .select("id, estate_name")
+          .eq("developer_account_id", params.developerAccountId)
+          .in("id", estateIds)
+          .returns<EstateLookupRow[]>()
+      : Promise.resolve({ data: [], error: null }),
+    plotIds.length > 0
+      ? supabase
+          .from("developer_plots")
+          .select("id, plot_number")
+          .eq("developer_account_id", params.developerAccountId)
+          .in("id", plotIds)
+          .returns<PlotLookupRow[]>()
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (buyersResult.error) {
+    throw buyersResult.error;
+  }
+
+  if (estatesResult.error) {
+    throw estatesResult.error;
+  }
+
+  if (plotsResult.error) {
+    throw plotsResult.error;
+  }
+
+  return {
+    salesById: toLookupMap(sales),
+    buyersById: toLookupMap(buyersResult.data ?? []),
+    estatesById: toLookupMap(estatesResult.data ?? []),
+    plotsById: toLookupMap(plotsResult.data ?? []),
+  };
+}
+
+async function getInvestorReturnRows(params: {
+  developerAccountId: string;
+}): Promise<InvestorReturnRow[]> {
+  const supabase = createSupabaseAdminClient();
+  const todayIso = getLagosDateIso();
+  const dueWindowEndIso = addDaysToIso(todayIso, 14);
+
+  const scheduleResult = await supabase
+    .from("developer_payment_schedule_items")
+    .select(
+      "id, sale_id, label, due_date, expected_amount, amount_paid, status",
+    )
+    .eq("developer_account_id", params.developerAccountId)
+    .in("status", ["pending", "part_paid"])
+    .lte("due_date", dueWindowEndIso)
+    .order("due_date", { ascending: true })
+    .limit(50)
+    .returns<ScheduleItemRow[]>();
+
+  if (scheduleResult.error) {
+    throw scheduleResult.error;
+  }
+
+  const scheduleRows = scheduleResult.data ?? [];
+  const saleIds = unique(scheduleRows.map((row) => row.sale_id));
+  const { salesById, buyersById, estatesById, plotsById } = await getLookupRows(
+    {
+      developerAccountId: params.developerAccountId,
+      saleIds,
+    },
+  );
+
+  return scheduleRows
+    .map((row) => {
+      const sale = salesById.get(row.sale_id);
+      const buyer = sale ? buyersById.get(sale.buyer_id) : null;
+      const estate = sale ? estatesById.get(sale.estate_id) : null;
+      const plot = sale ? plotsById.get(sale.plot_id) : null;
+      const expectedAmount = Number(row.expected_amount);
+      const amountPaid = Number(row.amount_paid);
+      const amountDue = Math.max(expectedAmount - amountPaid, 0);
+
+      return {
+        id: row.id,
+        investorName: buyer?.full_name ?? "Investor",
+        estateName: estate?.estate_name ?? "Estate",
+        plotNumber: plot?.plot_number ?? "Plot",
+        returnPlan: row.label,
+        dueDate: row.due_date,
+        amountDue,
+        statusLabel: getInvestorReturnStatus(row.due_date, todayIso),
+      };
+    })
+    .filter((row) => row.amountDue > 0);
+}
+
+async function getRecentActivityRows(params: {
+  developerAccountId: string;
+}): Promise<RecentActivityRow[]> {
+  const supabase = createSupabaseAdminClient();
+
+  const paymentsResult = await supabase
+    .from("developer_sale_payments")
+    .select("id, sale_id, amount_paid, payment_date, created_at")
+    .eq("developer_account_id", params.developerAccountId)
+    .eq("status", "posted")
+    .order("created_at", { ascending: false })
+    .limit(4)
+    .returns<RecentPaymentRow[]>();
+
+  if (paymentsResult.error) {
+    throw paymentsResult.error;
+  }
+
+  const payments = paymentsResult.data ?? [];
+  const saleIds = unique(payments.map((payment) => payment.sale_id));
+  const { salesById, buyersById, estatesById, plotsById } = await getLookupRows(
+    {
+      developerAccountId: params.developerAccountId,
+      saleIds,
+    },
+  );
+
+  return payments.map((payment) => {
+    const sale = salesById.get(payment.sale_id);
+    const buyer = sale ? buyersById.get(sale.buyer_id) : null;
+    const estate = sale ? estatesById.get(sale.estate_id) : null;
+    const plot = sale ? plotsById.get(sale.plot_id) : null;
+    const investorName = buyer?.full_name ?? "Investor";
+    const plotLabel = plot?.plot_number ? `Plot ${plot.plot_number}` : "Plot";
+    const estateLabel = estate?.estate_name ?? "Estate";
+
+    return {
+      id: payment.id,
+      title: `Payment received from ${investorName}`,
+      description: `${plotLabel} · ${estateLabel}`,
+      amount: Number(payment.amount_paid),
+      createdAt: payment.created_at,
+    };
+  });
 }
 
 function PayoutAccountSummary({
@@ -254,6 +628,53 @@ function PayoutAccountSummary({
   );
 }
 
+function OverviewStat({
+  label,
+  value,
+  helper,
+}: {
+  label: string;
+  value: string;
+  helper?: string;
+}) {
+  return (
+    <div className="min-w-0 border-border-soft px-4 first:pl-0 md:border-l md:first:border-l-0">
+      <p className="text-xs font-black uppercase tracking-wide text-text-muted">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-xl font-black text-text-strong">
+        {value}
+      </p>
+      {helper ? (
+        <p className="mt-1 truncate text-xs font-semibold text-text-muted">
+          {helper}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function InvestorStatusBadge({
+  status,
+}: {
+  status: InvestorReturnRow["statusLabel"];
+}) {
+  const className =
+    status === "Overdue"
+      ? "bg-danger-soft text-danger"
+      : status === "Due today" || status === "Due soon"
+        ? "bg-warning-soft text-warning"
+        : "bg-surface text-text-muted";
+
+  return (
+    <span
+      className={`inline-flex min-h-7 items-center rounded-full px-3 text-xs font-black ${className}`}
+    >
+      {status}
+    </span>
+  );
+}
+
 export default async function DeveloperDashboardPage({
   searchParams,
 }: DeveloperDashboardPageProps) {
@@ -283,22 +704,32 @@ export default async function DeveloperDashboardPage({
   const isSettingsSection = activeSection === "settings";
   const payoutCopy = getPayoutCopy(payoutState.state);
 
-  const [banks, documentSettings, metrics] = await Promise.all([
-    shouldShowBankForm ? getPaystackBanksForDeveloperSetup() : [],
-    isSettingsSection
-      ? getDeveloperDocumentTemplateSettingsForCurrentDeveloper()
-      : null,
-    account
-      ? getDashboardMetrics({ developerAccountId: account.id })
-      : Promise.resolve({
-          estates: 0,
-          plots: 0,
-          availablePlots: 0,
-          reservedPlots: 0,
-          activeSales: 0,
-          buyers: 0,
-        }),
-  ]);
+  const [banks, documentSettings, metrics, investorReturns, recentActivity] =
+    await Promise.all([
+      isSettingsSection && shouldShowBankForm
+        ? getPaystackBanksForDeveloperSetup()
+        : [],
+      isSettingsSection
+        ? getDeveloperDocumentTemplateSettingsForCurrentDeveloper()
+        : null,
+      account
+        ? getDashboardMetrics({ developerAccountId: account.id })
+        : Promise.resolve({
+            estateCount: 0,
+            totalPlots: 0,
+            availablePlots: 0,
+            activeSales: 0,
+            investorCount: 0,
+            salesReceivedThisMonth: 0,
+            paymentsReceivedToday: 0,
+          }),
+      account
+        ? getInvestorReturnRows({ developerAccountId: account.id })
+        : Promise.resolve([]),
+      account
+        ? getRecentActivityRows({ developerAccountId: account.id })
+        : Promise.resolve([]),
+    ]);
 
   if (isSettingsSection) {
     return (
@@ -378,7 +809,7 @@ export default async function DeveloperDashboardPage({
           <>
             <SectionCard
               title="Sale documents"
-              description="These are the standard documents Piedras helps you organize for each buyer."
+              description="These are the standard documents Piedras helps you organize for each sale."
             >
               <div className="grid gap-3 md:grid-cols-2">
                 {documentSettings.documentDefinitions.map((document) => (
@@ -402,7 +833,7 @@ export default async function DeveloperDashboardPage({
 
             <SectionCard
               title="Document auto-fill fields"
-              description="Piedras can automatically fill buyer, estate, plot, sale, and payment details into your document templates."
+              description="Piedras can automatically fill investor, estate, plot, sale, and payment details into your document templates."
             >
               <div className="flex flex-wrap gap-2">
                 {DEVELOPER_TEMPLATE_PLACEHOLDERS.map((placeholder) => (
@@ -430,273 +861,355 @@ export default async function DeveloperDashboardPage({
     );
   }
 
+  const todayIso = getLagosDateIso();
+  const overdueReturns = investorReturns.filter(
+    (row) => row.statusLabel === "Overdue",
+  );
+  const dueThisWeekReturns = investorReturns.filter(
+    (row) => row.statusLabel === "Due today" || row.statusLabel === "Due soon",
+  );
+  const overdueAmount = overdueReturns.reduce(
+    (total, row) => total + row.amountDue,
+    0,
+  );
+  const dueThisWeekAmount = dueThisWeekReturns.reduce(
+    (total, row) => total + row.amountDue,
+    0,
+  );
+  const firstName = developer.fullName.trim().split(/\s+/)[0] || "Developer";
+
   return (
-    <div className="space-y-7">
-      <PageHeader
-        title="Overview"
-        description="Track your estates, plots, buyers, and active sales from one real estate workspace."
-      />
+    <>
+      <DeveloperBankSetupToast state={payoutState.state} />
 
-      <section className="overflow-hidden rounded-card border border-border-soft bg-white shadow-card">
-        <div className="grid gap-0 lg:grid-cols-[1.25fr_0.75fr]">
-          <div className="p-5 sm:p-7">
-            <p className="text-sm font-black uppercase tracking-wide text-primary">
-              Estate sales workspace
+      <div className="space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-text-muted">
+              Welcome back, {firstName}
             </p>
-            <h1 className="mt-2 text-2xl font-black tracking-tight text-text-strong sm:text-3xl">
-              {account?.company_name ?? "Your real estate portfolio"}
+            <h1 className="mt-1 text-2xl font-black tracking-tight text-text-strong">
+              Overview
             </h1>
-            <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-text-muted">
-              Manage estates, organize plot inventory, track buyer activity, and
-              keep every sale record connected.
-            </p>
-
-            <div className="mt-5 flex flex-wrap gap-3">
-              <Link
-                href="/developer/estates"
-                className="inline-flex min-h-11 items-center justify-center rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-soft transition hover:bg-primary-hover"
-              >
-                Manage estates
-              </Link>
-
-              <Link
-                href="/developer/sales"
-                className="inline-flex min-h-11 items-center justify-center rounded-button bg-surface px-5 py-2.5 text-sm font-extrabold text-text-strong shadow-soft ring-1 ring-border-soft transition hover:bg-primary-soft hover:text-primary"
-              >
-                View sales
-              </Link>
-            </div>
           </div>
 
-          <div className="border-t border-border-soft bg-primary-soft p-5 sm:p-7 lg:border-l lg:border-t-0">
-            <p className="text-sm font-black text-text-strong">
-              Portfolio readiness
-            </p>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/developer/sales"
+              className="inline-flex min-h-10 items-center gap-2 rounded-button border border-border-soft bg-white px-4 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+            >
+              <ShoppingBag aria-hidden="true" size={18} strokeWidth={2.6} />
+              Record sale
+            </Link>
 
-            <div className="mt-4 space-y-3">
-              {[
-                {
-                  label: `${metrics.estates} estate${metrics.estates === 1 ? "" : "s"} created`,
-                  ready: metrics.estates > 0,
-                },
-                {
-                  label: `${metrics.plots} plot${metrics.plots === 1 ? "" : "s"} recorded`,
-                  ready: metrics.plots > 0,
-                },
-                {
-                  label:
-                    payoutState.state === "verified"
-                      ? "Buyer payment links ready"
-                      : "Bank approval needed for buyer payment links",
-                  ready: payoutState.state === "verified",
-                },
-              ].map((item) => (
-                <div key={item.label} className="flex items-start gap-3">
-                  <div
-                    className={
-                      item.ready
-                        ? "flex size-7 shrink-0 items-center justify-center rounded-full bg-success text-white"
-                        : "flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-warning"
-                    }
-                  >
-                    <CheckCircle2
-                      aria-hidden="true"
-                      size={17}
-                      strokeWidth={2.8}
-                    />
-                  </div>
+            <Link
+              href="/developer/sales"
+              className="inline-flex min-h-10 items-center gap-2 rounded-button border border-border-soft bg-white px-4 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+            >
+              <Link2 aria-hidden="true" size={18} strokeWidth={2.6} />
+              Send payment link
+            </Link>
 
-                  <p className="pt-1 text-sm font-bold leading-6 text-text-strong">
-                    {item.label}
-                  </p>
-                </div>
-              ))}
-            </div>
+            <Link
+              href="/developer/estates"
+              className="inline-flex min-h-10 items-center gap-2 rounded-button bg-primary px-4 text-sm font-extrabold text-white shadow-soft transition hover:bg-primary-hover"
+            >
+              <Building2 aria-hidden="true" size={18} strokeWidth={2.6} />
+              Add estate
+            </Link>
           </div>
         </div>
-      </section>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Estates</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black text-text-strong">
-              {metrics.estates}
-            </p>
-            <p className="mt-2 text-sm font-semibold text-text-muted">
-              Estate projects in your workspace.
-            </p>
-          </CardContent>
-        </Card>
+        <section className="rounded-card border border-border-soft bg-white p-4 shadow-card">
+          <div className="grid gap-4 md:grid-cols-4">
+            <OverviewStat
+              label="Estates selling"
+              value={String(metrics.estateCount)}
+              helper="Across all projects"
+            />
+            <OverviewStat
+              label="Available plots"
+              value={String(metrics.availablePlots)}
+              helper={`${metrics.totalPlots} total plots`}
+            />
+            <OverviewStat
+              label="Active sales"
+              value={String(metrics.activeSales)}
+              helper={`${metrics.investorCount} investors on record`}
+            />
+            <OverviewStat
+              label="Received this month"
+              value={formatNaira(metrics.salesReceivedThisMonth)}
+              helper={`${metrics.paymentsReceivedToday} payments today`}
+            />
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Total plots</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black text-text-strong">
-              {metrics.plots}
-            </p>
-            <p className="mt-2 text-sm font-semibold text-text-muted">
-              Plots created across all estates.
-            </p>
-          </CardContent>
-        </Card>
+        <section className="space-y-3">
+          {overdueReturns.length > 0 || payoutState.state !== "verified" ? (
+            <div className="flex flex-col gap-3 rounded-card border border-danger/20 bg-danger-soft px-4 py-3 md:flex-row md:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white text-danger">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    size={18}
+                    strokeWidth={2.7}
+                  />
+                </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Available plots</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black text-text-strong">
-              {metrics.availablePlots}
-            </p>
-            <p className="mt-2 text-sm font-semibold text-text-muted">
-              Plots still open for buyers.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Active sales</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-black text-text-strong">
-              {metrics.activeSales}
-            </p>
-            <p className="mt-2 text-sm font-semibold text-text-muted">
-              Buyer sales currently in progress.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-        <SectionCard
-          title="Sales activity"
-          description="A quick view of where buyer activity stands across your portfolio."
-        >
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              {
-                label: "Reserved plots",
-                value: metrics.reservedPlots,
-                icon: Map,
-              },
-              {
-                label: "Buyers",
-                value: metrics.buyers,
-                icon: Users,
-              },
-              {
-                label: "Active sales",
-                value: metrics.activeSales,
-                icon: ShoppingBag,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <div
-                  key={item.label}
-                  className="rounded-card border border-border-soft bg-background p-4"
-                >
-                  <div className="flex size-10 items-center justify-center rounded-2xl bg-white text-primary shadow-soft">
-                    <Icon aria-hidden="true" size={21} strokeWidth={2.6} />
-                  </div>
-
-                  <p className="mt-4 text-2xl font-black text-text-strong">
-                    {item.value}
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-text-muted">
-                    {item.label}
+                <div className="min-w-0">
+                  <p className="font-black text-danger">Needs attention</p>
+                  <p className="mt-1 text-sm font-semibold leading-5 text-danger">
+                    {overdueReturns.length > 0
+                      ? `${overdueReturns.length} investor return${
+                          overdueReturns.length === 1 ? "" : "s"
+                        } overdue · ${formatNaira(overdueAmount)} due`
+                      : "Bank account setup is pending"}
+                    {overdueReturns.length > 0 &&
+                    payoutState.state !== "verified"
+                      ? " · Bank account setup is pending"
+                      : ""}
                   </p>
                 </div>
-              );
-            })}
-          </div>
-        </SectionCard>
+              </div>
 
-        <section className="rounded-card border border-border-soft bg-white p-5 shadow-card">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div
-                className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${payoutCopy.iconTone}`}
-              >
-                <CreditCard aria-hidden="true" size={22} strokeWidth={2.6} />
+              <div className="flex flex-wrap gap-2">
+                {overdueReturns.length > 0 ? (
+                  <Link
+                    href="/developer/investors"
+                    className="inline-flex min-h-10 items-center justify-center rounded-button bg-white px-4 text-sm font-extrabold text-danger ring-1 ring-danger/20 transition hover:bg-danger/5"
+                  >
+                    View investors
+                  </Link>
+                ) : null}
+
+                {payoutState.state !== "verified" ? (
+                  <Link
+                    href="/developer?section=settings#payout-account"
+                    className="inline-flex min-h-10 items-center justify-center rounded-button bg-white px-4 text-sm font-extrabold text-danger ring-1 ring-danger/20 transition hover:bg-danger/5"
+                  >
+                    Add bank account
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white text-success">
+                <CheckCircle2 aria-hidden="true" size={18} strokeWidth={2.7} />
               </div>
 
               <div>
-                <h2 className="font-black text-text-strong">
-                  {payoutCopy.title}
-                </h2>
-                <p className="mt-2 text-sm font-semibold leading-6 text-text-muted">
-                  {payoutCopy.description}
+                <p className="font-black text-success">
+                  Today`&apos;`s activity
+                </p>
+                <p className="mt-1 text-sm font-semibold leading-5 text-success">
+                  {metrics.paymentsReceivedToday} payment
+                  {metrics.paymentsReceivedToday === 1 ? "" : "s"} received
+                  today
+                  {metrics.paymentsReceivedToday > 0
+                    ? ` · ${formatNaira(metrics.salesReceivedThisMonth)} received this month`
+                    : ""}
                 </p>
               </div>
             </div>
 
-            <Badge tone={payoutCopy.badgeTone}>{payoutCopy.badge}</Badge>
+            <Link
+              href="/developer/sales"
+              className="inline-flex min-h-10 items-center justify-center text-sm font-extrabold text-success transition hover:text-success/80"
+            >
+              View sales
+              <ArrowRight
+                aria-hidden="true"
+                className="ml-2"
+                size={16}
+                strokeWidth={2.7}
+              />
+            </Link>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-card border border-border-soft bg-white shadow-card">
+          <div className="flex items-center justify-between gap-4 border-b border-border-soft px-5 py-4">
+            <div>
+              <h2 className="font-black text-text-strong">
+                Investor returns due soon
+              </h2>
+              <p className="mt-1 text-sm font-semibold text-text-muted">
+                Prioritised by due date across all estates.
+              </p>
+            </div>
+
+            <Link
+              href="/developer/investors"
+              className="hidden items-center text-sm font-extrabold text-primary transition hover:text-primary-hover sm:inline-flex"
+            >
+              View all
+              <ArrowRight
+                aria-hidden="true"
+                className="ml-2"
+                size={16}
+                strokeWidth={2.7}
+              />
+            </Link>
           </div>
 
-          <Link
-            href="/developer?section=settings#payout-account"
-            className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-button bg-primary px-5 py-2.5 text-sm font-extrabold text-white shadow-soft transition hover:bg-primary-hover"
-          >
-            {payoutCopy.actionLabel}
-          </Link>
+          {investorReturns.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border-soft bg-background text-xs font-black uppercase tracking-wide text-text-muted">
+                    <th className="px-5 py-3">Investor</th>
+                    <th className="px-5 py-3">Estate / Plot</th>
+                    <th className="px-5 py-3">Return plan</th>
+                    <th className="px-5 py-3">Due date</th>
+                    <th className="px-5 py-3 text-right">Amount due</th>
+                    <th className="px-5 py-3">Status</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {investorReturns.slice(0, 6).map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-border-soft last:border-b-0"
+                    >
+                      <td className="px-5 py-4">
+                        <p className="font-black text-text-strong">
+                          {row.investorName}
+                        </p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <p className="font-bold text-text-strong">
+                          {row.estateName}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-text-muted">
+                          Plot {row.plotNumber}
+                        </p>
+                      </td>
+                      <td className="px-5 py-4 text-sm font-semibold text-text-muted">
+                        {row.returnPlan}
+                      </td>
+                      <td className="px-5 py-4 text-sm font-semibold text-text-muted">
+                        {getDueDateText(row.dueDate, todayIso)}
+                      </td>
+                      <td className="px-5 py-4 text-right font-black text-text-strong">
+                        {formatNaira(row.amountDue)}
+                      </td>
+                      <td className="px-5 py-4">
+                        <InvestorStatusBadge status={row.statusLabel} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-5 py-10 text-center">
+              <CalendarClock
+                aria-hidden="true"
+                className="mx-auto text-text-muted"
+                size={32}
+                strokeWidth={2.4}
+              />
+              <p className="mt-3 font-black text-text-strong">
+                No investor returns due soon
+              </p>
+              <p className="mt-1 text-sm font-semibold text-text-muted">
+                Upcoming returns will appear here when payment schedules are
+                active.
+              </p>
+            </div>
+          )}
+
+          <div className="border-t border-border-soft px-5 py-3 text-sm font-semibold text-text-muted">
+            Showing {Math.min(investorReturns.length, 6)} of{" "}
+            {investorReturns.length} due return
+            {investorReturns.length === 1 ? "" : "s"}
+            {dueThisWeekAmount > 0
+              ? ` · ${formatNaira(dueThisWeekAmount)} due this week`
+              : ""}
+          </div>
+        </section>
+
+        <section className="rounded-card border border-border-soft bg-white shadow-card">
+          <div className="flex items-center justify-between gap-4 border-b border-border-soft px-5 py-4">
+            <div>
+              <h2 className="font-black text-text-strong">Recent activity</h2>
+              <p className="mt-1 text-sm font-semibold text-text-muted">
+                Latest confirmed payments.
+              </p>
+            </div>
+
+            <Link
+              href="/developer/sales"
+              className="inline-flex items-center text-sm font-extrabold text-primary transition hover:text-primary-hover"
+            >
+              View all
+              <ArrowRight
+                aria-hidden="true"
+                className="ml-2"
+                size={16}
+                strokeWidth={2.7}
+              />
+            </Link>
+          </div>
+
+          {recentActivity.length > 0 ? (
+            <div className="divide-y divide-border-soft">
+              {recentActivity.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex items-center gap-4 px-5 py-4"
+                >
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-success-soft text-success">
+                    <CheckCircle2
+                      aria-hidden="true"
+                      size={20}
+                      strokeWidth={2.7}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-black text-text-strong">
+                      {activity.title}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-text-muted">
+                      {activity.description}
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="font-black text-text-strong">
+                      {formatNaira(activity.amount)}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-text-muted">
+                      {formatActivityTime(activity.createdAt)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-5 py-10 text-center">
+              <FileText
+                aria-hidden="true"
+                className="mx-auto text-text-muted"
+                size={32}
+                strokeWidth={2.4}
+              />
+              <p className="mt-3 font-black text-text-strong">
+                No payment activity yet
+              </p>
+              <p className="mt-1 text-sm font-semibold text-text-muted">
+                Confirmed payments will appear here.
+              </p>
+            </div>
+          )}
         </section>
       </div>
-
-      <SectionCard
-        title="Quick actions"
-        description="Jump into the main areas of your real estate sales workflow."
-      >
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            {
-              title: "Estates",
-              description: "Create estates and organize plot inventory.",
-              href: "/developer/estates",
-              icon: Building2,
-            },
-            {
-              title: "Buyers",
-              description: "Review buyers connected to your sales.",
-              href: "/developer/buyers",
-              icon: Users,
-            },
-            {
-              title: "Bank account",
-              description: "Add or review your payment account.",
-              href: "/developer?section=settings#payout-account",
-              icon: CreditCard,
-            },
-          ].map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-card border border-border-soft bg-background p-4 transition hover:border-primary/40 hover:bg-primary-soft"
-              >
-                <div className="flex size-10 items-center justify-center rounded-2xl bg-white text-primary shadow-soft">
-                  <Icon aria-hidden="true" size={21} strokeWidth={2.6} />
-                </div>
-
-                <p className="mt-4 font-black text-text-strong">{item.title}</p>
-                <p className="mt-1 text-sm font-semibold leading-6 text-text-muted">
-                  {item.description}
-                </p>
-              </Link>
-            );
-          })}
-        </div>
-      </SectionCard>
-    </div>
+    </>
   );
 }

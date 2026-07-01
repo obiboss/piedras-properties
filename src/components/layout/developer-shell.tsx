@@ -3,12 +3,9 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
-  BarChart3,
   Building2,
-  CreditCard,
   FileText,
   Home,
-  Map,
   Settings,
   ShoppingBag,
   UserRoundPlus,
@@ -47,31 +44,14 @@ const desktopNavItems: readonly DeveloperNavItem[] = [
     icon: Building2,
   },
   {
-    label: "Plot Directory",
-    href: "/developer/plots",
-    icon: Map,
-    disabled: true,
-  },
-  {
-    label: "Buyers",
-    href: "/developer/buyers",
-    icon: Users,
-  },
-  {
     label: "Sales",
     href: "/developer/sales",
     icon: ShoppingBag,
   },
   {
-    label: "Staff",
-    href: "/developer/staff",
-    icon: UserRoundPlus,
-  },
-  {
-    label: "Payments",
-    href: "/developer/payments",
-    icon: CreditCard,
-    disabled: true,
+    label: "Investors",
+    href: "/developer/investors",
+    icon: Users,
   },
   {
     label: "Documents",
@@ -80,10 +60,9 @@ const desktopNavItems: readonly DeveloperNavItem[] = [
     disabled: true,
   },
   {
-    label: "Reports",
-    href: "/developer/reports",
-    icon: BarChart3,
-    disabled: true,
+    label: "Staff",
+    href: "/developer/staff",
+    icon: UserRoundPlus,
   },
   {
     label: "Settings",
@@ -104,14 +83,14 @@ const mobilePrimaryItems: readonly DeveloperNavItem[] = [
     icon: Building2,
   },
   {
-    label: "Buyers",
-    href: "/developer/buyers",
-    icon: Users,
-  },
-  {
     label: "Sales",
     href: "/developer/sales",
     icon: ShoppingBag,
+  },
+  {
+    label: "Investors",
+    href: "/developer/investors",
+    icon: Users,
   },
   {
     label: "Staff",
@@ -156,7 +135,7 @@ function PiedrasBrand({ subtitle }: { subtitle: string }) {
   return (
     <Link href="/developer" className="flex min-w-0 items-center gap-3">
       <div className="flex size-11 items-center justify-center rounded-2xl bg-primary text-2xl font-extrabold tracking-tight text-white shadow-soft">
-        B
+        P
       </div>
 
       <div className="min-w-0">
@@ -185,7 +164,7 @@ export function DeveloperShell({
     <ToastProvider>
       <div className="min-h-screen bg-background">
         <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-border-soft bg-white px-5 py-6 lg:block">
-          <PiedrasBrand subtitle="Developer sales workspace" />
+          <PiedrasBrand subtitle="Developer workspace" />
 
           <nav className="mt-8 space-y-2">
             {desktopNavItems.map((item) => {
@@ -255,7 +234,7 @@ export function DeveloperShell({
               <div className="flex items-center gap-3">
                 <div className="hidden text-right sm:block">
                   <p className="text-sm font-extrabold text-text-strong">
-                    {companyName ?? "Developer account"}
+                    {companyName ?? "Piedras Properties"}
                   </p>
                   <p className="text-xs font-semibold text-text-muted">
                     Estate sales workspace
