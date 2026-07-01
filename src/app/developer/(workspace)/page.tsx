@@ -9,6 +9,7 @@ import {
   FileText,
   Link2,
   ShoppingBag,
+  TrendingUp,
 } from "lucide-react";
 import { DeveloperBankSetupToast } from "@/components/developer/developer-bank-setup-toast";
 import { DeveloperDocumentTemplateForm } from "@/components/developer/developer-document-template-form";
@@ -20,6 +21,14 @@ import { DEVELOPER_TEMPLATE_PLACEHOLDERS } from "@/constants/developer-document-
 import { getDeveloperAccountByOwnerProfileId } from "@/server/repositories/developer.repository";
 import { requireDeveloper } from "@/server/services/auth.service";
 import { getDeveloperDocumentTemplateSettingsForCurrentDeveloper } from "@/server/services/developer-document-templates.service";
+import {
+  getDeveloperInvestorReturnRows,
+  getDeveloperOverviewMetrics,
+  getDeveloperRecentActivityRows,
+  getDateDiffInDays,
+  getLagosDateIso,
+  type DeveloperInvestorReturnRow,
+} from "@/server/services/developer-investor-payouts.service";
 import {
   getDeveloperPayoutAccountState,
   getPaystackBanksForDeveloperSetup,
@@ -33,84 +42,6 @@ type DeveloperDashboardPageProps = {
 };
 
 type PayoutDashboardState = "missing" | "unverified" | "verified" | "failed";
-
-type DashboardMetric = {
-  estateCount: number;
-  totalPlots: number;
-  availablePlots: number;
-  activeSales: number;
-  investorCount: number;
-  salesReceivedThisMonth: number;
-  paymentsReceivedToday: number;
-};
-
-type CountQueryResult = {
-  count: number | null;
-  error: unknown;
-};
-
-type SalePaymentAmountRow = {
-  amount_paid: number | string | null;
-};
-
-type ScheduleItemRow = {
-  id: string;
-  sale_id: string;
-  label: string;
-  due_date: string;
-  expected_amount: number | string;
-  amount_paid: number | string;
-  status: string;
-};
-
-type SaleLookupRow = {
-  id: string;
-  buyer_id: string;
-  estate_id: string;
-  plot_id: string;
-};
-
-type BuyerLookupRow = {
-  id: string;
-  full_name: string;
-};
-
-type EstateLookupRow = {
-  id: string;
-  estate_name: string;
-};
-
-type PlotLookupRow = {
-  id: string;
-  plot_number: string;
-};
-
-type RecentPaymentRow = {
-  id: string;
-  sale_id: string;
-  amount_paid: number | string;
-  payment_date: string;
-  created_at: string;
-};
-
-type InvestorReturnRow = {
-  id: string;
-  investorName: string;
-  estateName: string;
-  plotNumber: string;
-  returnPlan: string;
-  dueDate: string;
-  amountDue: number;
-  statusLabel: "Overdue" | "Due today" | "Due soon" | "Upcoming";
-};
-
-type RecentActivityRow = {
-  id: string;
-  title: string;
-  description: string;
-  amount: number;
-  createdAt: string;
-};
 
 function getSingleSearchParam(
   value: string | string[] | undefined,
@@ -164,43 +95,6 @@ function formatNaira(amount: number) {
   }).format(amount);
 }
 
-function getLagosDateIso(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Lagos",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
-
-  if (!year || !month || !day) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  return `${year}-${month}-${day}`;
-}
-
-function addDaysToIso(dateIso: string, days: number) {
-  const date = new Date(`${dateIso}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-
-  return date.toISOString().slice(0, 10);
-}
-
-function getMonthStartIso(todayIso: string) {
-  return `${todayIso.slice(0, 7)}-01`;
-}
-
-function getDateDiffInDays(fromIso: string, toIso: string) {
-  const from = new Date(`${fromIso}T00:00:00.000Z`).getTime();
-  const to = new Date(`${toIso}T00:00:00.000Z`).getTime();
-
-  return Math.round((to - from) / 86_400_000);
-}
-
 function getDueDateText(dueDate: string, todayIso: string) {
   const diff = getDateDiffInDays(todayIso, dueDate);
 
@@ -219,33 +113,11 @@ function getDueDateText(dueDate: string, todayIso: string) {
   return `${formatDate(dueDate)} · in ${diff} days`;
 }
 
-function getInvestorReturnStatus(
-  dueDate: string,
-  todayIso: string,
-): InvestorReturnRow["statusLabel"] {
-  const diff = getDateDiffInDays(todayIso, dueDate);
-
-  if (diff < 0) {
-    return "Overdue";
-  }
-
-  if (diff === 0) {
-    return "Due today";
-  }
-
-  if (diff <= 7) {
-    return "Due soon";
-  }
-
-  return "Upcoming";
-}
-
 function getPayoutCopy(state: PayoutDashboardState) {
   if (state === "verified") {
     return {
       badge: "Ready",
       badgeTone: "success" as const,
-      title: "Payment account ready",
       description:
         "Buyer payment links are available. Sale payments can be routed to your approved bank account.",
       iconTone: "bg-success-soft text-success",
@@ -256,7 +128,6 @@ function getPayoutCopy(state: PayoutDashboardState) {
     return {
       badge: "Under review",
       badgeTone: "warning" as const,
-      title: "Bank account under review",
       description:
         "You can keep managing estates and sales. Payment links unlock after approval.",
       iconTone: "bg-warning-soft text-warning",
@@ -267,7 +138,6 @@ function getPayoutCopy(state: PayoutDashboardState) {
     return {
       badge: "Needs correction",
       badgeTone: "danger" as const,
-      title: "Bank account needs correction",
       description: "Update your bank details before sending payment links.",
       iconTone: "bg-danger-soft text-danger",
     };
@@ -276,294 +146,10 @@ function getPayoutCopy(state: PayoutDashboardState) {
   return {
     badge: "Action needed",
     badgeTone: "warning" as const,
-    title: "Add bank account",
     description:
       "Add the bank account where buyer payments should be settled before sending payment links.",
     iconTone: "bg-primary-soft text-primary",
   };
-}
-
-async function getExactCount(query: PromiseLike<CountQueryResult>) {
-  const result = await query;
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  return result.count ?? 0;
-}
-
-function unique(values: string[]) {
-  return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
-}
-
-function toLookupMap<TRow extends { id: string }>(rows: TRow[]) {
-  return new Map(rows.map((row) => [row.id, row]));
-}
-
-async function getDashboardMetrics(params: {
-  developerAccountId: string;
-}): Promise<DashboardMetric> {
-  const supabase = createSupabaseAdminClient();
-  const todayIso = getLagosDateIso();
-  const monthStartIso = getMonthStartIso(todayIso);
-
-  const [
-    estateCount,
-    totalPlots,
-    availablePlots,
-    activeSales,
-    investorCount,
-    paymentsToday,
-    paymentsThisMonthResult,
-  ] = await Promise.all([
-    getExactCount(
-      supabase
-        .from("developer_estates")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId),
-    ),
-    getExactCount(
-      supabase
-        .from("developer_plots")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId),
-    ),
-    getExactCount(
-      supabase
-        .from("developer_plots")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId)
-        .eq("status", "available"),
-    ),
-    getExactCount(
-      supabase
-        .from("developer_sales")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId)
-        .eq("status", "active"),
-    ),
-    getExactCount(
-      supabase
-        .from("developer_buyers")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId),
-    ),
-    getExactCount(
-      supabase
-        .from("developer_sale_payments")
-        .select("id", { count: "exact", head: true })
-        .eq("developer_account_id", params.developerAccountId)
-        .eq("status", "posted")
-        .eq("payment_date", todayIso),
-    ),
-    supabase
-      .from("developer_sale_payments")
-      .select("amount_paid")
-      .eq("developer_account_id", params.developerAccountId)
-      .eq("status", "posted")
-      .gte("payment_date", monthStartIso)
-      .returns<SalePaymentAmountRow[]>(),
-  ]);
-
-  if (paymentsThisMonthResult.error) {
-    throw paymentsThisMonthResult.error;
-  }
-
-  const salesReceivedThisMonth = (paymentsThisMonthResult.data ?? []).reduce(
-    (total, row) => total + Number(row.amount_paid ?? 0),
-    0,
-  );
-
-  return {
-    estateCount,
-    totalPlots,
-    availablePlots,
-    activeSales,
-    investorCount,
-    salesReceivedThisMonth,
-    paymentsReceivedToday: paymentsToday,
-  };
-}
-
-async function getLookupRows(params: {
-  developerAccountId: string;
-  saleIds: string[];
-}) {
-  const supabase = createSupabaseAdminClient();
-
-  if (params.saleIds.length === 0) {
-    return {
-      salesById: new Map<string, SaleLookupRow>(),
-      buyersById: new Map<string, BuyerLookupRow>(),
-      estatesById: new Map<string, EstateLookupRow>(),
-      plotsById: new Map<string, PlotLookupRow>(),
-    };
-  }
-
-  const salesResult = await supabase
-    .from("developer_sales")
-    .select("id, buyer_id, estate_id, plot_id")
-    .eq("developer_account_id", params.developerAccountId)
-    .in("id", params.saleIds)
-    .returns<SaleLookupRow[]>();
-
-  if (salesResult.error) {
-    throw salesResult.error;
-  }
-
-  const sales = salesResult.data ?? [];
-  const buyerIds = unique(sales.map((sale) => sale.buyer_id));
-  const estateIds = unique(sales.map((sale) => sale.estate_id));
-  const plotIds = unique(sales.map((sale) => sale.plot_id));
-
-  const [buyersResult, estatesResult, plotsResult] = await Promise.all([
-    buyerIds.length > 0
-      ? supabase
-          .from("developer_buyers")
-          .select("id, full_name")
-          .eq("developer_account_id", params.developerAccountId)
-          .in("id", buyerIds)
-          .returns<BuyerLookupRow[]>()
-      : Promise.resolve({ data: [], error: null }),
-    estateIds.length > 0
-      ? supabase
-          .from("developer_estates")
-          .select("id, estate_name")
-          .eq("developer_account_id", params.developerAccountId)
-          .in("id", estateIds)
-          .returns<EstateLookupRow[]>()
-      : Promise.resolve({ data: [], error: null }),
-    plotIds.length > 0
-      ? supabase
-          .from("developer_plots")
-          .select("id, plot_number")
-          .eq("developer_account_id", params.developerAccountId)
-          .in("id", plotIds)
-          .returns<PlotLookupRow[]>()
-      : Promise.resolve({ data: [], error: null }),
-  ]);
-
-  if (buyersResult.error) {
-    throw buyersResult.error;
-  }
-
-  if (estatesResult.error) {
-    throw estatesResult.error;
-  }
-
-  if (plotsResult.error) {
-    throw plotsResult.error;
-  }
-
-  return {
-    salesById: toLookupMap(sales),
-    buyersById: toLookupMap(buyersResult.data ?? []),
-    estatesById: toLookupMap(estatesResult.data ?? []),
-    plotsById: toLookupMap(plotsResult.data ?? []),
-  };
-}
-
-async function getInvestorReturnRows(params: {
-  developerAccountId: string;
-}): Promise<InvestorReturnRow[]> {
-  const supabase = createSupabaseAdminClient();
-  const todayIso = getLagosDateIso();
-  const dueWindowEndIso = addDaysToIso(todayIso, 14);
-
-  const scheduleResult = await supabase
-    .from("developer_payment_schedule_items")
-    .select(
-      "id, sale_id, label, due_date, expected_amount, amount_paid, status",
-    )
-    .eq("developer_account_id", params.developerAccountId)
-    .in("status", ["pending", "part_paid"])
-    .lte("due_date", dueWindowEndIso)
-    .order("due_date", { ascending: true })
-    .limit(50)
-    .returns<ScheduleItemRow[]>();
-
-  if (scheduleResult.error) {
-    throw scheduleResult.error;
-  }
-
-  const scheduleRows = scheduleResult.data ?? [];
-  const saleIds = unique(scheduleRows.map((row) => row.sale_id));
-  const { salesById, buyersById, estatesById, plotsById } = await getLookupRows(
-    {
-      developerAccountId: params.developerAccountId,
-      saleIds,
-    },
-  );
-
-  return scheduleRows
-    .map((row) => {
-      const sale = salesById.get(row.sale_id);
-      const buyer = sale ? buyersById.get(sale.buyer_id) : null;
-      const estate = sale ? estatesById.get(sale.estate_id) : null;
-      const plot = sale ? plotsById.get(sale.plot_id) : null;
-      const expectedAmount = Number(row.expected_amount);
-      const amountPaid = Number(row.amount_paid);
-      const amountDue = Math.max(expectedAmount - amountPaid, 0);
-
-      return {
-        id: row.id,
-        investorName: buyer?.full_name ?? "Investor",
-        estateName: estate?.estate_name ?? "Estate",
-        plotNumber: plot?.plot_number ?? "Plot",
-        returnPlan: row.label,
-        dueDate: row.due_date,
-        amountDue,
-        statusLabel: getInvestorReturnStatus(row.due_date, todayIso),
-      };
-    })
-    .filter((row) => row.amountDue > 0);
-}
-
-async function getRecentActivityRows(params: {
-  developerAccountId: string;
-}): Promise<RecentActivityRow[]> {
-  const supabase = createSupabaseAdminClient();
-
-  const paymentsResult = await supabase
-    .from("developer_sale_payments")
-    .select("id, sale_id, amount_paid, payment_date, created_at")
-    .eq("developer_account_id", params.developerAccountId)
-    .eq("status", "posted")
-    .order("created_at", { ascending: false })
-    .limit(4)
-    .returns<RecentPaymentRow[]>();
-
-  if (paymentsResult.error) {
-    throw paymentsResult.error;
-  }
-
-  const payments = paymentsResult.data ?? [];
-  const saleIds = unique(payments.map((payment) => payment.sale_id));
-  const { salesById, buyersById, estatesById, plotsById } = await getLookupRows(
-    {
-      developerAccountId: params.developerAccountId,
-      saleIds,
-    },
-  );
-
-  return payments.map((payment) => {
-    const sale = salesById.get(payment.sale_id);
-    const buyer = sale ? buyersById.get(sale.buyer_id) : null;
-    const estate = sale ? estatesById.get(sale.estate_id) : null;
-    const plot = sale ? plotsById.get(sale.plot_id) : null;
-    const investorName = buyer?.full_name ?? "Investor";
-    const plotLabel = plot?.plot_number ? `Plot ${plot.plot_number}` : "Plot";
-    const estateLabel = estate?.estate_name ?? "Estate";
-
-    return {
-      id: payment.id,
-      title: `Payment received from ${investorName}`,
-      description: `${plotLabel} · ${estateLabel}`,
-      amount: Number(payment.amount_paid),
-      createdAt: payment.created_at,
-    };
-  });
 }
 
 function PayoutAccountSummary({
@@ -657,7 +243,7 @@ function OverviewStat({
 function InvestorStatusBadge({
   status,
 }: {
-  status: InvestorReturnRow["statusLabel"];
+  status: DeveloperInvestorReturnRow["statusLabel"];
 }) {
   const className =
     status === "Overdue"
@@ -713,7 +299,7 @@ export default async function DeveloperDashboardPage({
         ? getDeveloperDocumentTemplateSettingsForCurrentDeveloper()
         : null,
       account
-        ? getDashboardMetrics({ developerAccountId: account.id })
+        ? getDeveloperOverviewMetrics({ developerAccountId: account.id })
         : Promise.resolve({
             estateCount: 0,
             totalPlots: 0,
@@ -724,10 +310,10 @@ export default async function DeveloperDashboardPage({
             paymentsReceivedToday: 0,
           }),
       account
-        ? getInvestorReturnRows({ developerAccountId: account.id })
+        ? getDeveloperInvestorReturnRows({ developerAccountId: account.id })
         : Promise.resolve([]),
       account
-        ? getRecentActivityRows({ developerAccountId: account.id })
+        ? getDeveloperRecentActivityRows({ developerAccountId: account.id })
         : Promise.resolve([]),
     ]);
 
@@ -911,6 +497,14 @@ export default async function DeveloperDashboardPage({
             </Link>
 
             <Link
+              href="/developer/investors"
+              className="inline-flex min-h-10 items-center gap-2 rounded-button border border-border-soft bg-white px-4 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+            >
+              <TrendingUp aria-hidden="true" size={18} strokeWidth={2.6} />
+              Investors
+            </Link>
+
+            <Link
               href="/developer/estates"
               className="inline-flex min-h-10 items-center gap-2 rounded-button bg-primary px-4 text-sm font-extrabold text-white shadow-soft transition hover:bg-primary-hover"
             >
@@ -1038,7 +632,7 @@ export default async function DeveloperDashboardPage({
                 Investor returns due soon
               </h2>
               <p className="mt-1 text-sm font-semibold text-text-muted">
-                Prioritised by due date across all estates.
+                Prioritised by due date across all investor records.
               </p>
             </div>
 
@@ -1062,8 +656,7 @@ export default async function DeveloperDashboardPage({
                 <thead>
                   <tr className="border-b border-border-soft bg-background text-xs font-black uppercase tracking-wide text-text-muted">
                     <th className="px-5 py-3">Investor</th>
-                    <th className="px-5 py-3">Estate / Plot</th>
-                    <th className="px-5 py-3">Return plan</th>
+                    <th className="px-5 py-3">Investment</th>
                     <th className="px-5 py-3">Due date</th>
                     <th className="px-5 py-3 text-right">Amount due</th>
                     <th className="px-5 py-3">Status</th>
@@ -1081,16 +674,8 @@ export default async function DeveloperDashboardPage({
                           {row.investorName}
                         </p>
                       </td>
-                      <td className="px-5 py-4">
-                        <p className="font-bold text-text-strong">
-                          {row.estateName}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-text-muted">
-                          Plot {row.plotNumber}
-                        </p>
-                      </td>
                       <td className="px-5 py-4 text-sm font-semibold text-text-muted">
-                        {row.returnPlan}
+                        {row.investmentTitle}
                       </td>
                       <td className="px-5 py-4 text-sm font-semibold text-text-muted">
                         {getDueDateText(row.dueDate, todayIso)}
@@ -1118,8 +703,8 @@ export default async function DeveloperDashboardPage({
                 No investor returns due soon
               </p>
               <p className="mt-1 text-sm font-semibold text-text-muted">
-                Upcoming returns will appear here when payment schedules are
-                active.
+                Upcoming returns will appear here when investor payout schedules
+                are active.
               </p>
             </div>
           )}
@@ -1139,7 +724,7 @@ export default async function DeveloperDashboardPage({
             <div>
               <h2 className="font-black text-text-strong">Recent activity</h2>
               <p className="mt-1 text-sm font-semibold text-text-muted">
-                Latest confirmed payments.
+                Latest confirmed sale payments.
               </p>
             </div>
 
@@ -1204,7 +789,7 @@ export default async function DeveloperDashboardPage({
                 No payment activity yet
               </p>
               <p className="mt-1 text-sm font-semibold text-text-muted">
-                Confirmed payments will appear here.
+                Confirmed sale payments will appear here.
               </p>
             </div>
           )}
