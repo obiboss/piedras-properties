@@ -32,6 +32,7 @@ export type DeveloperInvestorDetail = {
   };
   investments: DeveloperInvestorInvestmentDetail[];
   payouts: DeveloperInvestorPayoutDetail[];
+  events: DeveloperInvestorPayoutEventDetail[];
 };
 
 export type DeveloperInvestorInvestmentDetail = {
@@ -62,6 +63,20 @@ export type DeveloperInvestorPayoutDetail = {
   paymentReference: string | null;
   notes: string | null;
   payoutType: "return" | "capital_plus_return";
+};
+
+export type DeveloperInvestorPayoutEventDetail = {
+  id: string;
+  payoutId: string;
+  eventType: "marked_paid" | "note";
+  eventTitle: string;
+  eventNote: string | null;
+  amountDue: number;
+  amountPaid: number;
+  paymentChannel: string | null;
+  paymentReference: string | null;
+  eventDate: string;
+  createdAt: string;
 };
 
 export type MarkInvestorPayoutPaidResult = {
@@ -120,6 +135,20 @@ type PayoutForPaymentRow = {
   amount_due: number | string;
   amount_paid: number | string;
   status: "pending" | "part_paid" | "paid" | "cancelled";
+};
+
+type PayoutEventRow = {
+  id: string;
+  payout_id: string;
+  event_type: "marked_paid" | "note";
+  event_title: string;
+  event_note: string | null;
+  amount_due: number | string;
+  amount_paid: number | string;
+  payment_channel: string | null;
+  payment_reference: string | null;
+  event_date: string;
+  created_at: string;
 };
 
 type PlanRow = {
@@ -301,6 +330,40 @@ async function getPayouts(params: {
   return data ?? [];
 }
 
+async function getEvents(params: {
+  supabase: SupabaseClient;
+  developerAccountId: string;
+  investorId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("developer_investor_payout_events")
+    .select(
+      `
+        id,
+        payout_id,
+        event_type,
+        event_title,
+        event_note,
+        amount_due,
+        amount_paid,
+        payment_channel,
+        payment_reference,
+        event_date,
+        created_at
+      `,
+    )
+    .eq("developer_account_id", params.developerAccountId)
+    .eq("investor_id", params.investorId)
+    .order("created_at", { ascending: false })
+    .returns<PayoutEventRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? [];
+}
+
 async function getPlans(params: {
   supabase: SupabaseClient;
   planIds: string[];
@@ -355,9 +418,10 @@ export async function getDeveloperInvestorDetail(params: {
 }): Promise<DeveloperInvestorDetail> {
   const investor = await getInvestor(params);
 
-  const [investments, payouts] = await Promise.all([
+  const [investments, payouts, events] = await Promise.all([
     getInvestments(params),
     getPayouts(params),
+    getEvents(params),
   ]);
 
   const planIds = investments
@@ -412,6 +476,20 @@ export async function getDeveloperInvestorDetail(params: {
     })),
   );
 
+  const eventDetails = events.map((event) => ({
+    id: event.id,
+    payoutId: event.payout_id,
+    eventType: event.event_type,
+    eventTitle: event.event_title,
+    eventNote: event.event_note,
+    amountDue: toNumber(event.amount_due),
+    amountPaid: toNumber(event.amount_paid),
+    paymentChannel: event.payment_channel,
+    paymentReference: event.payment_reference,
+    eventDate: event.event_date,
+    createdAt: event.created_at,
+  }));
+
   const unpaidPayouts = payoutDetails.filter(
     (payout) => payout.status !== "paid" && payout.status !== "cancelled",
   );
@@ -453,6 +531,7 @@ export async function getDeveloperInvestorDetail(params: {
     },
     investments: investmentDetails,
     payouts: payoutDetails,
+    events: eventDetails,
   };
 }
 

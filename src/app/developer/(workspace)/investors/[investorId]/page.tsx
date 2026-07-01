@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   Clock3,
   Landmark,
+  MessageCircle,
+  ReceiptText,
 } from "lucide-react";
 import { DeveloperPayoutMarkPaidForm } from "@/components/developer/developer-payout-mark-paid-form";
 import { getDeveloperAccountByOwnerProfileId } from "@/server/repositories/developer.repository";
@@ -51,6 +53,32 @@ function formatChannel(value: string | null) {
     .split("_")
     .map((item) => item.slice(0, 1).toUpperCase() + item.slice(1))
     .join(" ");
+}
+
+function buildWhatsAppHref(params: {
+  phoneNumber: string | null;
+  investorName: string;
+  amountPaid: number;
+  paidAt: string | null;
+  paymentReference: string | null;
+}) {
+  if (!params.phoneNumber || !params.paymentReference) {
+    return null;
+  }
+
+  const digits = params.phoneNumber.replace(/\D/g, "");
+
+  if (digits.length < 7) {
+    return null;
+  }
+
+  const message = `Hello ${params.investorName}, Piedras Properties confirms that your investor payout of ${formatNaira(
+    params.amountPaid,
+  )} was paid on ${formatDate(params.paidAt)}. Reference: ${
+    params.paymentReference
+  }. Thank you.`;
+
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
 function StatusBadge({ status }: { status: DeveloperInvestorDetailStatus }) {
@@ -209,6 +237,16 @@ export default async function DeveloperInvestorDetailPage({
             {detail.payouts.map((payout) => {
               const canMarkPaid =
                 payout.status !== "paid" && payout.status !== "cancelled";
+              const whatsappHref =
+                payout.status === "paid"
+                  ? buildWhatsAppHref({
+                      phoneNumber: detail.investor.phoneNumber,
+                      investorName: detail.investor.fullName,
+                      amountPaid: payout.amountPaid,
+                      paidAt: payout.paidAt,
+                      paymentReference: payout.paymentReference,
+                    })
+                  : null;
 
               return (
                 <div
@@ -289,7 +327,7 @@ export default async function DeveloperInvestorDetailPage({
                       amountDue={payout.amountDue}
                     />
                   ) : (
-                    <div className="rounded-button border border-success/20 bg-success-soft p-4">
+                    <div className="space-y-3 rounded-button border border-success/20 bg-success-soft p-4">
                       <div className="flex items-start gap-3">
                         <CheckCircle2
                           aria-hidden="true"
@@ -306,6 +344,22 @@ export default async function DeveloperInvestorDetailPage({
                           </p>
                         </div>
                       </div>
+
+                      {whatsappHref ? (
+                        <a
+                          href={whatsappHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-button bg-success px-4 text-sm font-extrabold text-white transition hover:opacity-90"
+                        >
+                          <MessageCircle
+                            aria-hidden="true"
+                            size={17}
+                            strokeWidth={2.7}
+                          />
+                          Send WhatsApp confirmation
+                        </a>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -322,6 +376,69 @@ export default async function DeveloperInvestorDetailPage({
             />
             <p className="mt-3 font-black text-text-strong">
               No payout schedule yet
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="overflow-hidden rounded-card border border-border-soft bg-white shadow-card">
+        <div className="border-b border-border-soft px-5 py-4">
+          <h2 className="font-black text-text-strong">Payout audit trail</h2>
+          <p className="mt-1 text-sm font-semibold text-text-muted">
+            Every marked payout is recorded here for internal tracking.
+          </p>
+        </div>
+
+        {detail.events.length > 0 ? (
+          <div className="divide-y divide-border-soft">
+            {detail.events.map((event) => (
+              <div key={event.id} className="px-5 py-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="font-black text-text-strong">
+                      {event.eventTitle}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-text-muted">
+                      {formatDate(event.eventDate)} ·{" "}
+                      {formatChannel(event.paymentChannel)}
+                    </p>
+                  </div>
+
+                  <p className="font-black text-success">
+                    {formatNaira(event.amountPaid)}
+                  </p>
+                </div>
+
+                {event.paymentReference ? (
+                  <p className="mt-3 text-sm font-semibold text-text-muted">
+                    Reference:{" "}
+                    <span className="font-black text-text-strong">
+                      {event.paymentReference}
+                    </span>
+                  </p>
+                ) : null}
+
+                {event.eventNote ? (
+                  <p className="mt-2 text-sm font-semibold leading-6 text-text-muted">
+                    Note: {event.eventNote}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-5 py-12 text-center">
+            <ReceiptText
+              aria-hidden="true"
+              className="mx-auto text-text-muted"
+              size={34}
+              strokeWidth={2.4}
+            />
+            <p className="mt-3 font-black text-text-strong">
+              No payout event yet
+            </p>
+            <p className="mx-auto mt-1 max-w-md text-sm font-semibold leading-6 text-text-muted">
+              Audit records will appear after a payout is marked as paid.
             </p>
           </div>
         )}
