@@ -5,6 +5,8 @@ import {
   CheckCircle2,
   TrendingUp,
 } from "lucide-react";
+import { DeveloperInvestmentPlanForm } from "@/components/developer/developer-investment-plan-form";
+import { DeveloperInvestmentPlanList } from "@/components/developer/developer-investment-plan-list";
 import { getDeveloperAccountByOwnerProfileId } from "@/server/repositories/developer.repository";
 import { requireDeveloper } from "@/server/services/auth.service";
 import {
@@ -13,6 +15,7 @@ import {
   getLagosDateIso,
   type DeveloperInvestorDashboardRow,
 } from "@/server/services/developer-investor-payouts.service";
+import { listDeveloperInvestmentPlans } from "@/server/services/developer-investment-plans.service";
 import { createSupabaseAdminClient } from "@/server/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -85,9 +88,15 @@ export default async function DeveloperInvestorsPage() {
     developer.id,
   );
 
-  const investors = account
-    ? await getDeveloperInvestorRows({ developerAccountId: account.id })
-    : [];
+  const [investors, investmentPlans] = account
+    ? await Promise.all([
+        getDeveloperInvestorRows({ developerAccountId: account.id }),
+        listDeveloperInvestmentPlans({
+          supabase,
+          developerAccountId: account.id,
+        }),
+      ])
+    : [[], []];
 
   const todayIso = getLagosDateIso();
   const overdueInvestors = investors.filter(
@@ -135,7 +144,7 @@ export default async function DeveloperInvestorsPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-text-muted">
-            Investor records and payout dates
+            Investor plans, payment links, and payout dates
           </p>
           <h1 className="mt-1 text-2xl font-black tracking-tight text-text-strong">
             Investors
@@ -163,10 +172,10 @@ export default async function DeveloperInvestorsPage() {
 
           <div className="border-border-soft px-4 first:pl-0 md:border-l md:first:border-l-0">
             <p className="text-xs font-black uppercase tracking-wide text-text-muted">
-              Overdue
+              Plans
             </p>
-            <p className="mt-1 text-xl font-black text-danger">
-              {overdueInvestors.length}
+            <p className="mt-1 text-xl font-black text-primary">
+              {investmentPlans.length}
             </p>
           </div>
 
@@ -298,12 +307,30 @@ export default async function DeveloperInvestorsPage() {
               No investors recorded yet
             </p>
             <p className="mx-auto mt-1 max-w-md text-sm font-semibold leading-6 text-text-muted">
-              Once investor records and payout schedules are added, their due
-              returns will appear here in priority order.
+              Investors will appear here after they complete payment through an
+              investment link.
             </p>
           </div>
         )}
       </section>
+
+      <section className="rounded-card border border-border-soft bg-white p-5 shadow-card">
+        <div className="border-b border-border-soft pb-4">
+          <h2 className="font-black text-text-strong">
+            Create investment plan
+          </h2>
+          <p className="mt-1 text-sm font-semibold leading-6 text-text-muted">
+            Create the offer marketers will share. Investor records are created
+            after payment is verified.
+          </p>
+        </div>
+
+        <div className="mt-5">
+          <DeveloperInvestmentPlanForm />
+        </div>
+      </section>
+
+      <DeveloperInvestmentPlanList plans={investmentPlans} />
 
       {dueSoonInvestors.length === 0 && overdueInvestors.length === 0 ? (
         <section className="rounded-card border border-success/20 bg-success-soft p-4">
