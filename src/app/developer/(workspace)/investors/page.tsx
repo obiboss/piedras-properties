@@ -212,8 +212,8 @@ export default async function DeveloperInvestorsPage() {
                 {overdueInvestors.length === 1 ? "" : "s"} overdue
               </p>
               <p className="mt-1 text-sm font-semibold leading-5 text-danger">
-                These investors should remain at the top until the payout is
-                marked as paid.
+                These investors remain at the top until the payout is marked as
+                paid.
               </p>
             </div>
           </div>
@@ -227,7 +227,8 @@ export default async function DeveloperInvestorsPage() {
               Investor payout table
             </h2>
             <p className="mt-1 text-sm font-semibold text-text-muted">
-              Overdue and due-soon payouts stay on top.
+              Open an investor to view the payout schedule and mark payouts as
+              paid.
             </p>
           </div>
         </div>
@@ -243,6 +244,7 @@ export default async function DeveloperInvestorsPage() {
                   <th className="px-5 py-3">Next payout</th>
                   <th className="px-5 py-3 text-right">Amount due</th>
                   <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
 
@@ -253,9 +255,12 @@ export default async function DeveloperInvestorsPage() {
                     className="border-b border-border-soft last:border-b-0"
                   >
                     <td className="px-5 py-4">
-                      <p className="font-black text-text-strong">
+                      <Link
+                        href={`/developer/investors/${investor.id}`}
+                        className="font-black text-text-strong transition hover:text-primary"
+                      >
                         {investor.fullName}
-                      </p>
+                      </Link>
                       <p className="mt-1 text-xs font-semibold capitalize text-text-muted">
                         {investor.status}
                       </p>
@@ -289,6 +294,15 @@ export default async function DeveloperInvestorsPage() {
 
                     <td className="px-5 py-4">
                       <StatusBadge status={investor.payoutStatus} />
+                    </td>
+
+                    <td className="px-5 py-4 text-right">
+                      <Link
+                        href={`/developer/investors/${investor.id}`}
+                        className="inline-flex min-h-9 items-center justify-center rounded-button border border-border-soft bg-white px-3 text-xs font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+                      >
+                        Open
+                      </Link>
                     </td>
                   </tr>
                 ))}
