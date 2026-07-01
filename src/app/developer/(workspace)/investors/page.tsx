@@ -5,10 +5,12 @@ import {
   CheckCircle2,
   TrendingUp,
 } from "lucide-react";
+import { DeveloperInvestmentLeadFollowUpList } from "@/components/developer/developer-investment-lead-follow-up-list";
 import { DeveloperInvestmentPlanForm } from "@/components/developer/developer-investment-plan-form";
 import { DeveloperInvestmentPlanList } from "@/components/developer/developer-investment-plan-list";
 import { getDeveloperAccountByOwnerProfileId } from "@/server/repositories/developer.repository";
 import { requireDeveloper } from "@/server/services/auth.service";
+import { listDeveloperInvestmentUnpaidLeads } from "@/server/services/developer-investment-leads.service";
 import {
   getDeveloperInvestorRows,
   getDateDiffInDays,
@@ -88,15 +90,20 @@ export default async function DeveloperInvestorsPage() {
     developer.id,
   );
 
-  const [investors, investmentPlans] = account
+  const [investors, investmentPlans, unpaidLeads] = account
     ? await Promise.all([
         getDeveloperInvestorRows({ developerAccountId: account.id }),
         listDeveloperInvestmentPlans({
           supabase,
           developerAccountId: account.id,
         }),
+        listDeveloperInvestmentUnpaidLeads({
+          supabase,
+          developerAccountId: account.id,
+          limit: 20,
+        }),
       ])
-    : [[], []];
+    : [[], [], []];
 
   const todayIso = getLagosDateIso();
   const overdueInvestors = investors.filter(
@@ -160,7 +167,7 @@ export default async function DeveloperInvestorsPage() {
       </div>
 
       <section className="rounded-card border border-border-soft bg-white p-4 shadow-card">
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <div className="border-border-soft px-4 first:pl-0 md:border-l md:first:border-l-0">
             <p className="text-xs font-black uppercase tracking-wide text-text-muted">
               Investors
@@ -176,6 +183,15 @@ export default async function DeveloperInvestorsPage() {
             </p>
             <p className="mt-1 text-xl font-black text-primary">
               {investmentPlans.length}
+            </p>
+          </div>
+
+          <div className="border-border-soft px-4 first:pl-0 md:border-l md:first:border-l-0">
+            <p className="text-xs font-black uppercase tracking-wide text-text-muted">
+              Unpaid leads
+            </p>
+            <p className="mt-1 text-xl font-black text-danger">
+              {unpaidLeads.length}
             </p>
           </div>
 
@@ -219,6 +235,8 @@ export default async function DeveloperInvestorsPage() {
           </div>
         </section>
       ) : null}
+
+      <DeveloperInvestmentLeadFollowUpList leads={unpaidLeads} />
 
       <section className="overflow-hidden rounded-card border border-border-soft bg-white shadow-card">
         <div className="flex items-center justify-between gap-4 border-b border-border-soft px-5 py-4">
