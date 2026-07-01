@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Link2, MessageCircle } from "lucide-react";
+import { Check, Copy, Link2, MessageCircle } from "lucide-react";
 import { createInvestmentPaymentLinkAction } from "@/actions/developer-investment-plans.actions";
 import { initialDeveloperInvestmentPlanActionState } from "@/actions/developer-investment-plans.state";
 
@@ -69,10 +69,10 @@ function LinkButton() {
     <button
       type="submit"
       disabled={pending}
-      className="inline-flex min-h-9 items-center justify-center gap-2 rounded-button bg-primary px-3 text-xs font-extrabold text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+      className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-button bg-primary px-4 text-sm font-extrabold text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
     >
-      <Link2 aria-hidden="true" size={15} strokeWidth={2.6} />
-      {pending ? "Creating..." : "Create link"}
+      <Link2 aria-hidden="true" size={16} strokeWidth={2.6} />
+      {pending ? "Creating link..." : "Create investor link"}
     </button>
   );
 }
@@ -82,52 +82,84 @@ function InvestmentLinkForm({ plan }: { plan: DeveloperInvestmentPlanRow }) {
     createInvestmentPaymentLinkAction,
     initialDeveloperInvestmentPlanActionState,
   );
-  const linkInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (state.investmentLink && linkInputRef.current) {
-      linkInputRef.current.select();
-      void navigator.clipboard.writeText(state.investmentLink).catch(() => {});
-    }
-  }, [state.investmentLink]);
+  const [copied, setCopied] = useState(false);
 
   const whatsappHref = useMemo(() => {
     if (!state.investmentLink) {
       return null;
     }
 
-    const message = `Hello, please use this secure Piedras Properties link to review the ${plan.plan_name} investment plan and proceed with payment: ${state.investmentLink}`;
+    const message = `Hello, please use this secure Piedras Properties link to review the ${plan.plan_name} investment offer and proceed with payment: ${state.investmentLink}`;
 
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }, [plan.plan_name, state.investmentLink]);
 
+  async function copyInvestmentLink() {
+    if (!state.investmentLink) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(state.investmentLink);
+      setCopied(true);
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 1800);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <form action={formAction}>
         <input type="hidden" name="investmentPlanId" value={plan.id} />
         <LinkButton />
       </form>
 
       {state.investmentLink ? (
-        <div className="space-y-2">
-          <input
-            ref={linkInputRef}
-            readOnly
-            value={state.investmentLink}
-            className="w-full rounded-button border border-border-soft bg-background px-3 py-2 text-xs font-bold text-text-strong"
-          />
+        <div className="rounded-2xl border border-primary/15 bg-white p-3">
+          <button
+            type="button"
+            onClick={copyInvestmentLink}
+            className="block w-full rounded-xl bg-primary-soft px-3 py-3 text-left transition hover:bg-primary-soft/80"
+            aria-label="Copy investment link"
+          >
+            <span className="block text-xs font-black uppercase tracking-wide text-primary">
+              Click to copy link
+            </span>
+            <span className="mt-2 block break-all text-sm font-black leading-6 text-text-strong">
+              {state.investmentLink}
+            </span>
+          </button>
 
-          {whatsappHref ? (
-            <a
-              href={whatsappHref}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-button border border-border-soft bg-white px-3 text-xs font-extrabold text-text-strong transition hover:bg-success-soft hover:text-success"
+          <div className="mt-3 grid gap-2">
+            <button
+              type="button"
+              onClick={copyInvestmentLink}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-button border border-border-soft bg-white px-3 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
             >
-              <MessageCircle aria-hidden="true" size={15} strokeWidth={2.6} />
-              Send via WhatsApp
-            </a>
-          ) : null}
+              {copied ? (
+                <Check aria-hidden="true" size={16} strokeWidth={2.7} />
+              ) : (
+                <Copy aria-hidden="true" size={16} strokeWidth={2.7} />
+              )}
+              {copied ? "Copied" : "Copy link"}
+            </button>
+
+            {whatsappHref ? (
+              <a
+                href={whatsappHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-button border border-success/20 bg-white px-3 text-sm font-extrabold text-text-strong transition hover:bg-success-soft hover:text-success"
+              >
+                <MessageCircle aria-hidden="true" size={16} strokeWidth={2.6} />
+                Send via WhatsApp
+              </a>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -145,10 +177,10 @@ export function DeveloperInvestmentPlanList({
     return (
       <div className="rounded-card border border-border-soft bg-white px-5 py-10 text-center shadow-card">
         <p className="font-black text-text-strong">
-          No investment plan created yet
+          No investment offer created yet
         </p>
         <p className="mx-auto mt-2 max-w-md text-sm font-semibold leading-6 text-text-muted">
-          Create the first plan marketers can share with prospective investors.
+          Create the first offer marketers can share with prospective investors.
         </p>
       </div>
     );
@@ -157,9 +189,9 @@ export function DeveloperInvestmentPlanList({
   return (
     <div className="overflow-hidden rounded-card border border-border-soft bg-white shadow-card">
       <div className="border-b border-border-soft px-5 py-4">
-        <h2 className="font-black text-text-strong">Investment plans</h2>
+        <h2 className="font-black text-text-strong">Existing offers</h2>
         <p className="mt-1 text-sm font-semibold text-text-muted">
-          Create a secure link from a plan and send it to a prospective
+          Create a secure link from an offer and send it to a prospective
           investor.
         </p>
       </div>
@@ -168,7 +200,7 @@ export function DeveloperInvestmentPlanList({
         {plans.map((plan) => (
           <div
             key={plan.id}
-            className="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_230px]"
+            className="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_320px]"
           >
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -217,7 +249,7 @@ export function DeveloperInvestmentPlanList({
 
             <div className="rounded-button border border-border-soft bg-background p-3">
               <p className="mb-3 text-xs font-black uppercase tracking-wide text-text-muted">
-                Marketer link
+                Investor payment link
               </p>
               <InvestmentLinkForm plan={plan} />
             </div>

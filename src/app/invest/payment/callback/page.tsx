@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { CheckCircle2, Download, XCircle } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarClock,
+  CheckCircle2,
+  Download,
+  XCircle,
+} from "lucide-react";
 import { verifyAndFinalizeInvestmentPayment } from "@/server/services/investment-payment-link.service";
 import { createSupabaseAdminClient } from "@/server/supabase/admin";
 
@@ -16,12 +22,18 @@ type CallbackState =
       status: "success";
       title: string;
       message: string;
+      investorName: string;
+      nextPayoutDate: string | null;
+      investmentPortalUrl: string;
       receiptDownloadUrl: string | null;
     }
   | {
       status: "error";
       title: string;
       message: string;
+      investorName: null;
+      nextPayoutDate: null;
+      investmentPortalUrl: null;
       receiptDownloadUrl: null;
     };
 
@@ -48,6 +60,24 @@ function resolvePaymentReference(params: {
   );
 }
 
+function formatNaira(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "No pending return yet";
+  }
+
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
 async function resolveCallbackState(
   reference: string | undefined,
 ): Promise<CallbackState> {
@@ -57,6 +87,9 @@ async function resolveCallbackState(
       title: "Payment reference missing",
       message:
         "Your payment may have gone through, but the payment reference was not found on this page. Contact Piedras Properties with your payment alert.",
+      investorName: null,
+      nextPayoutDate: null,
+      investmentPortalUrl: null,
       receiptDownloadUrl: null,
     };
   }
@@ -70,13 +103,12 @@ async function resolveCallbackState(
     return {
       status: "success",
       title: "Investment payment confirmed",
-      message: `Your payment of ${new Intl.NumberFormat("en-NG", {
-        style: "currency",
-        currency: "NGN",
-        maximumFractionDigits: 0,
-      }).format(
+      message: `Your payment of ${formatNaira(
         result.amountPaid,
-      )} has been confirmed. Your investor record, payout schedule, and receipt have been created.`,
+      )} has been confirmed. Your investor record, return schedule, and receipt have been created.`,
+      investorName: result.investorName,
+      nextPayoutDate: result.nextPayoutDate,
+      investmentPortalUrl: `/invest/${result.token}`,
       receiptDownloadUrl: result.receiptDownloadUrl,
     };
   } catch (error) {
@@ -87,6 +119,9 @@ async function resolveCallbackState(
       title: "Payment could not be confirmed",
       message:
         "We could not confirm this investment payment yet. If your account was debited, contact Piedras Properties with your payment reference.",
+      investorName: null,
+      nextPayoutDate: null,
+      investmentPortalUrl: null,
       receiptDownloadUrl: null,
     };
   }
@@ -130,6 +165,34 @@ export default async function InvestmentPaymentCallbackPage({
           {pageState.message}
         </p>
 
+        {pageState.status === "success" ? (
+          <div className="mt-5 rounded-2xl bg-primary-soft p-4 text-left">
+            <p className="text-xs font-black uppercase tracking-wide text-primary">
+              Investor
+            </p>
+            <p className="mt-1 font-black text-text-strong">
+              {pageState.investorName}
+            </p>
+
+            <div className="mt-4 flex items-start gap-3">
+              <CalendarClock
+                aria-hidden="true"
+                className="mt-0.5 shrink-0 text-primary"
+                size={18}
+                strokeWidth={2.7}
+              />
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-primary">
+                  Next return date
+                </p>
+                <p className="mt-1 text-sm font-black text-text-strong">
+                  {formatDate(pageState.nextPayoutDate)}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
           {pageState.receiptDownloadUrl ? (
             <a
@@ -143,13 +206,30 @@ export default async function InvestmentPaymentCallbackPage({
             </a>
           ) : null}
 
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center justify-center rounded-button border border-border-soft bg-white px-5 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
-          >
-            Done
-          </Link>
+          {pageState.investmentPortalUrl ? (
+            <Link
+              href={pageState.investmentPortalUrl}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-button border border-border-soft bg-white px-5 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+            >
+              View my investment
+              <ArrowRight aria-hidden="true" size={18} strokeWidth={2.6} />
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-button border border-border-soft bg-white px-5 text-sm font-extrabold text-text-strong transition hover:bg-primary-soft hover:text-primary"
+            >
+              Close
+            </Link>
+          )}
         </div>
+
+        {pageState.status === "success" && !pageState.receiptDownloadUrl ? (
+          <p className="mt-4 text-xs font-bold leading-5 text-warning">
+            Your payment is confirmed. The receipt link is still being prepared;
+            open “View my investment” and refresh after a moment.
+          </p>
+        ) : null}
       </section>
     </main>
   );

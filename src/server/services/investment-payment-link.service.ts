@@ -10,6 +10,7 @@ import {
   initializePaystackTransaction,
   verifyPaystackTransaction,
 } from "@/server/services/paystack.service";
+import { createSignedDeveloperPaymentReceiptPdfUrl } from "@/server/services/storage.service";
 
 export type PublicInvestmentPlan = {
   id: string;
@@ -61,10 +62,38 @@ export type PublicInvestmentPaymentLink = {
   receipt_generated: boolean;
 };
 
+export type PublicInvestorPortalPayout = {
+  id: string;
+  payoutLabel: string;
+  dueDate: string;
+  amountDue: number;
+  amountPaid: number;
+  status: string;
+  payoutType: string | null;
+};
+
+export type PublicInvestorPortalData = {
+  investorName: string;
+  investorPhoneNumber: string | null;
+  investorEmail: string | null;
+  investmentTitle: string;
+  principalAmount: number;
+  expectedReturnAmount: number;
+  maturityTotalAmount: number;
+  startDate: string;
+  maturityDate: string;
+  investmentStatus: string;
+  receiptNumber: string | null;
+  receiptDownloadUrl: string | null;
+  nextPayoutDate: string | null;
+  payouts: PublicInvestorPortalPayout[];
+};
+
 export type PublicInvestmentPageData = {
   companyName: string;
   link: PublicInvestmentPaymentLink;
   plan: PublicInvestmentPlan;
+  portal: PublicInvestorPortalData | null;
 };
 
 type DeveloperAccountRow = {
@@ -84,6 +113,27 @@ type ExistingInvestmentRow = {
   maturity_date: string;
 };
 
+type InvestorPortalInvestmentRow = {
+  id: string;
+  investment_title: string;
+  principal_amount: number | string;
+  expected_return_amount: number | string;
+  maturity_total_amount: number | string;
+  start_date: string;
+  maturity_date: string;
+  status: string;
+};
+
+type InvestorPortalPayoutRow = {
+  id: string;
+  payout_label: string;
+  due_date: string;
+  amount_due: number | string;
+  amount_paid: number | string;
+  status: string;
+  payout_type: string | null;
+};
+
 type PaymentLinkLookupRow = PublicInvestmentPaymentLink;
 
 type PaystackVerifiedTransaction = {
@@ -97,8 +147,11 @@ type PaystackVerifiedTransaction = {
 type FinalizedInvestmentPayment = {
   investorId: string;
   investmentId: string;
+  token: string;
+  investorName: string;
   amountPaid: number;
   maturityDate: string;
+  nextPayoutDate: string | null;
   receiptDownloadUrl: string | null;
 };
 
@@ -251,6 +304,16 @@ function calculatePayoutRows(params: {
   });
 }
 
+function getNextPayoutDate(payouts: PublicInvestorPortalPayout[]) {
+  const nextPayout = payouts.find(
+    (payout) =>
+      payout.status !== "paid" &&
+      Number(payout.amountPaid) < Number(payout.amountDue),
+  );
+
+  return nextPayout?.dueDate ?? null;
+}
+
 async function getDeveloperAccount(params: {
   supabase: SupabaseClient;
   developerAccountId: string;
@@ -394,6 +457,169 @@ async function getPaymentLinkByReference(params: {
   return data;
 }
 
+async function getInvestorById(params: {
+  supabase: SupabaseClient;
+  investorId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("developer_investors")
+    .select("id, full_name, phone_number, email")
+    .eq("id", params.investorId)
+    .maybeSingle<InvestorRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getInvestmentById(params: {
+  supabase: SupabaseClient;
+  investmentId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("developer_investor_investments")
+    .select(
+      `
+        id,
+        investment_title,
+        principal_amount,
+        expected_return_amount,
+        maturity_total_amount,
+        start_date,
+        maturity_date,
+        status
+      `,
+    )
+    .eq("id", params.investmentId)
+    .maybeSingle<InvestorPortalInvestmentRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getInvestmentPayouts(params: {
+  supabase: SupabaseClient;
+  investmentId: string;
+}) {
+  const { data, error } = await params.supabase
+    .from("developer_investor_payouts")
+    .select(
+      `
+        id,
+        payout_label,
+        due_date,
+        amount_due,
+        amount_paid,
+        status,
+        payout_type
+      `,
+    )
+    .eq("investment_id", params.investmentId)
+    .order("due_date", { ascending: true })
+    .returns<InvestorPortalPayoutRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((payout) => ({
+    id: payout.id,
+    payoutLabel: payout.payout_label,
+    dueDate: payout.due_date,
+    amountDue: Number(payout.amount_due),
+    amountPaid: Number(payout.amount_paid),
+    status: payout.status,
+    payoutType: payout.payout_type,
+  }));
+}
+
+async function generateReceiptSafely(paymentLinkId: string) {
+  try {
+    const receipt = await generateInvestmentPaymentReceiptSystem(paymentLinkId);
+
+    return receipt.receiptDownloadUrl;
+  } catch (error) {
+    console.error("Failed to generate investment receipt:", error);
+
+    return null;
+  }
+}
+
+async function getReceiptDownloadUrlSafely(link: PublicInvestmentPaymentLink) {
+  if (link.receipt_path) {
+    const existingUrl = await createSignedDeveloperPaymentReceiptPdfUrl(
+      link.receipt_path,
+    );
+
+    if (existingUrl) {
+      return existingUrl;
+    }
+  }
+
+  return generateReceiptSafely(link.id);
+}
+
+async function getInvestorPortalData(params: {
+  supabase: SupabaseClient;
+  link: PublicInvestmentPaymentLink;
+}): Promise<PublicInvestorPortalData | null> {
+  if (
+    params.link.status !== "paid" ||
+    !params.link.investor_id ||
+    !params.link.investment_id
+  ) {
+    return null;
+  }
+
+  const [investor, investment, payouts, receiptDownloadUrl] = await Promise.all(
+    [
+      getInvestorById({
+        supabase: params.supabase,
+        investorId: params.link.investor_id,
+      }),
+      getInvestmentById({
+        supabase: params.supabase,
+        investmentId: params.link.investment_id,
+      }),
+      getInvestmentPayouts({
+        supabase: params.supabase,
+        investmentId: params.link.investment_id,
+      }),
+      getReceiptDownloadUrlSafely(params.link),
+    ],
+  );
+
+  if (!investment) {
+    return null;
+  }
+
+  const investorName =
+    investor?.full_name ?? params.link.investor_full_name ?? "Investor";
+
+  return {
+    investorName,
+    investorPhoneNumber:
+      investor?.phone_number ?? params.link.investor_phone_number,
+    investorEmail: investor?.email ?? params.link.investor_email,
+    investmentTitle: investment.investment_title,
+    principalAmount: Number(investment.principal_amount),
+    expectedReturnAmount: Number(investment.expected_return_amount),
+    maturityTotalAmount: Number(investment.maturity_total_amount),
+    startDate: investment.start_date,
+    maturityDate: investment.maturity_date,
+    investmentStatus: investment.status,
+    receiptNumber: params.link.receipt_number,
+    receiptDownloadUrl,
+    nextPayoutDate: getNextPayoutDate(payouts),
+    payouts,
+  };
+}
+
 function assertLinkCanAcceptPayment(params: {
   link: PublicInvestmentPaymentLink;
   plan: PublicInvestmentPlan;
@@ -464,18 +690,6 @@ function assertAmountAllowed(params: {
   }
 }
 
-async function generateReceiptSafely(paymentLinkId: string) {
-  try {
-    const receipt = await generateInvestmentPaymentReceiptSystem(paymentLinkId);
-
-    return receipt.receiptDownloadUrl;
-  } catch (error) {
-    console.error("Failed to generate investment receipt:", error);
-
-    return null;
-  }
-}
-
 export async function getPublicInvestmentPageData(params: {
   supabase: SupabaseClient;
   token: string;
@@ -489,11 +703,16 @@ export async function getPublicInvestmentPageData(params: {
     supabase: params.supabase,
     developerAccountId: link.developer_account_id,
   });
+  const portal = await getInvestorPortalData({
+    supabase: params.supabase,
+    link,
+  });
 
   return {
     companyName: developerAccount.company_name,
     link,
     plan,
+    portal,
   };
 }
 
@@ -765,14 +984,21 @@ export async function verifyAndFinalizeInvestmentPayment(params: {
   const link = await getPaymentLinkByReference(params);
 
   if (link.status === "paid" && link.investor_id && link.investment_id) {
-    const receiptDownloadUrl = await generateReceiptSafely(link.id);
+    const portal = await getInvestorPortalData({
+      supabase: params.supabase,
+      link,
+    });
 
     return {
       investorId: link.investor_id,
       investmentId: link.investment_id,
+      token: link.token,
+      investorName:
+        portal?.investorName ?? link.investor_full_name ?? "Investor",
       amountPaid: Number(link.amount_paid ?? link.amount_requested ?? 0),
-      maturityDate: getTodayIso(),
-      receiptDownloadUrl,
+      maturityDate: portal?.maturityDate ?? getTodayIso(),
+      nextPayoutDate: portal?.nextPayoutDate ?? null,
+      receiptDownloadUrl: portal?.receiptDownloadUrl ?? null,
     };
   }
 
@@ -847,13 +1073,20 @@ export async function verifyAndFinalizeInvestmentPayment(params: {
     throw updateLinkError;
   }
 
-  const receiptDownloadUrl = await generateReceiptSafely(link.id);
+  const refreshedLink = await getPaymentLinkByReference(params);
+  const portal = await getInvestorPortalData({
+    supabase: params.supabase,
+    link: refreshedLink,
+  });
 
   return {
     investorId: investor.id,
     investmentId: created.investmentId,
+    token: refreshedLink.token,
+    investorName: portal?.investorName ?? investor.full_name,
     amountPaid,
     maturityDate: created.maturityDate,
-    receiptDownloadUrl,
+    nextPayoutDate: portal?.nextPayoutDate ?? created.maturityDate,
+    receiptDownloadUrl: portal?.receiptDownloadUrl ?? null,
   };
 }

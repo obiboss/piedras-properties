@@ -315,7 +315,6 @@ export async function generateInvestmentPaymentReceiptSystem(
       receipt_number: receiptNumber,
       receipt_path: receiptPath,
       receipt_generated: true,
-      receipt_id: paymentLink.id,
     })
     .eq("id", paymentLink.id);
 

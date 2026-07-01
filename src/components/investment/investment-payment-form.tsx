@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { startInvestmentPaymentAction } from "@/actions/investment-payment.actions";
 import { initialInvestmentPaymentActionState } from "@/actions/investment-payment.state";
 import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 
 type InvestmentPaymentFormProps = {
@@ -85,14 +86,15 @@ export function InvestmentPaymentForm({
         required
       />
 
-      <Input
+      <CurrencyInput
         label="Investment amount"
         name="amount"
-        type="number"
-        min={minimumAmount}
-        max={maximumAmount ?? undefined}
-        step="0.01"
-        placeholder={String(minimumAmount)}
+        defaultValue={minimumAmount}
+        helperText={
+          maximumAmount
+            ? `Minimum ₦${minimumAmount.toLocaleString("en-NG")} · Maximum ₦${maximumAmount.toLocaleString("en-NG")}`
+            : `Minimum ₦${minimumAmount.toLocaleString("en-NG")}`
+        }
         required
       />
 
